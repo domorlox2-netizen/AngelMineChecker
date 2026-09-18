@@ -1,0 +1,14 @@
+﻿## Visual Studio / MSBuild
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+## Logs & Temp
+*.log
+*.tmp
+crash.log
+download_error.log
