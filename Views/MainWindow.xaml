@@ -996,7 +996,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/Everything.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/Everything.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="Everything" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
@@ -1018,7 +1018,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/ShellBagAnalyzer.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/ShellBagAnalyzer.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="ShellBags" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
@@ -1040,7 +1040,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/BrowserDownloadsView.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/BrowserDownloadsView.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="BrowserDownloads" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
@@ -1062,7 +1062,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/ExecutedProgramsList.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/ExecutedProgramsList.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="ExecutedProgramms" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
@@ -1084,7 +1084,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/USBDeview.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/USBDeview.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="USBDeview" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
@@ -1106,7 +1106,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/WinPrefetchView.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/WinPrefetchView.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="WinPrefetchView" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
@@ -1128,7 +1128,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/BrowsingHistoryView.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/BrowsingHistoryView.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="BrowsingHistory" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
@@ -1150,7 +1150,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/JumpListsView.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/JumpListsView.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="JumpListView" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
@@ -1172,7 +1172,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/UserAssistView.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/UserAssistView.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="UserAssistView" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
@@ -1194,7 +1194,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/ProcessHacker.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/ProcessHacker.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="Process Hacker" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
@@ -1216,7 +1216,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/JournalTrace.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/JournalTrace.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="JournalTrace" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
@@ -1238,7 +1238,7 @@
 
                                             </Grid.ColumnDefinitions>
 
-                                            <Image Source="icons/SystemInformer.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Image Source="/icons/SystemInformer.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                                             <TextBlock Grid.Column="1" Text="System Informer" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
 
