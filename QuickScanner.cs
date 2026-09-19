@@ -549,6 +549,14 @@ namespace AngelMineChecker
                             log($"Найден: Инжектор {Path.GetFileName(f)} ({f})");
                             banReasons.Add($"Инжектор {Path.GetFileName(f)}");
                             found++;
+                            continue;
+                        }
+
+                        if (CheckDoomsdayJar(new FileInfo(f), out string dReason))
+                        {
+                            log($"Найден чит Doomsday: {Path.GetFileName(f)} ({f}) [{dReason}]");
+                            banReasons.Add($"Найден Doomsday - {f} ({dReason})");
+                            found++;
                         }
                     }
                 }
@@ -562,64 +570,116 @@ namespace AngelMineChecker
         {
             reason = "";
             if (file == null || !file.Exists) return false;
+            if (IsCheckerOrSelf(file.FullName)) return false;
 
             try
             {
                 long len = file.Length;
+                if (len < 512 || len > 35 * 1024 * 1024) return false;
+
                 string ext = file.Extension.ToLower();
 
-                if (len >= 30000 && len <= 31500)
+                bool isZip = false;
+                using (var fs = file.OpenRead())
+                {
+                    byte[] magic = new byte[4];
+                    int read = fs.Read(magic, 0, 4);
+                    if (read >= 2 && magic[0] == 0x50 && magic[1] == 0x4B)
+                    {
+                        isZip = true;
+                    }
+                }
+
+                bool isDllDisguised = (ext == ".dll" && isZip);
+
+                if (len >= 28000 && len <= 35000)
                 {
                     byte[] raw = File.ReadAllBytes(file.FullName);
                     string rawUtf8 = Encoding.UTF8.GetString(raw);
                     if (rawUtf8.Contains("net/minecraft/client/entity/player/ClientPlayerEntity") ||
                         rawUtf8.Contains("net/minecraft/util/math/AxisAlignedBB"))
                     {
-                        reason = "размер ~30KB и сигнатура Entity/AxisAlignedBB";
+                        reason = isDllDisguised
+                            ? "Doomsday, замаскированный под .dll (размер ~30KB и сигнатура Entity/AxisAlignedBB)"
+                            : "размер ~30KB и сигнатура Entity/AxisAlignedBB";
                         return true;
                     }
                 }
 
-                if ((ext == ".jar" || ext == ".zip" || ext == ".disabled" || ext == ".bak") && len >= 21504 && len <= 10485760)
+                if (isZip || ext == ".jar" || ext == ".zip" || ext == ".dll" || ext == ".disabled" || ext == ".bak")
                 {
-                    using (var archive = ZipFile.OpenRead(file.FullName))
+                    bool hasLPng = false;
+                    bool hasMcmodInfo = false;
+                    bool hasNetJavaS = false;
+                    bool hasNetJavaF = false;
+                    bool hasClassFiles = false;
+                    bool hasManifest = false;
+                    bool hasDoomsdayName = false;
+
+                    try
                     {
-                        bool hasLPng = false;
-                        bool hasMcmodInfo = false;
-                        bool hasNetJavaS = false;
-                        bool hasNetJavaF = false;
-
-                        foreach (var entry in archive.Entries)
+                        using (var archive = ZipFile.OpenRead(file.FullName))
                         {
-                            string eName = entry.FullName.ToLower().Replace('\\', '/');
+                            foreach (var entry in archive.Entries)
+                            {
+                                string eName = entry.FullName.ToLower().Replace('\\', '/');
 
-                            if (eName.EndsWith("l.png") || eName == "l.png")
-                                hasLPng = true;
+                                if (eName.EndsWith(".class"))
+                                    hasClassFiles = true;
 
-                            if (eName.EndsWith("mcmod.info") || eName == "mcmod.info")
-                                hasMcmodInfo = true;
+                                if (eName.EndsWith("manifest.mf"))
+                                    hasManifest = true;
 
-                            if (eName.Contains("net/java/s.class") || (eName.Contains("net/java") && eName.EndsWith("/s.class")))
-                                hasNetJavaS = true;
+                                if (eName.Contains("doomsday") || eName.Contains("doomday"))
+                                    hasDoomsdayName = true;
 
-                            if (eName.Contains("net/java/f.class") || (eName.Contains("net/java") && eName.EndsWith("/f.class")))
-                                hasNetJavaF = true;
+                                if (eName.EndsWith("l.png") || eName == "l.png")
+                                    hasLPng = true;
+
+                                if (eName.EndsWith("mcmod.info") || eName == "mcmod.info")
+                                    hasMcmodInfo = true;
+
+                                if (eName.Contains("net/java/s.class") || (eName.Contains("net/java") && eName.EndsWith("/s.class")))
+                                    hasNetJavaS = true;
+
+                                if (eName.Contains("net/java/f.class") || (eName.Contains("net/java") && eName.EndsWith("/f.class")))
+                                    hasNetJavaF = true;
+                            }
                         }
 
                         if (hasLPng && hasMcmodInfo)
                         {
-                            reason = "сигнатура Doomsday (l.png + mcmod.info)";
+                            reason = isDllDisguised
+                                ? "Doomsday, замаскированный под .dll (l.png + mcmod.info)"
+                                : "сигнатура Doomsday (l.png + mcmod.info)";
                             return true;
                         }
 
                         if (hasNetJavaS && hasNetJavaF)
                         {
-                            reason = "сигнатура Doomsday (net/java/s.class + net/java/f.class)";
+                            reason = isDllDisguised
+                                ? "Doomsday, замаскированный под .dll (net/java/s.class + net/java/f.class)"
+                                : "сигнатура Doomsday (net/java/s.class + net/java/f.class)";
+                            return true;
+                        }
+
+                        if (hasDoomsdayName)
+                        {
+                            reason = isDllDisguised
+                                ? "Doomsday, замаскированный под .dll (внутренние пути doomsday)"
+                                : "сигнатура Doomsday (внутренние пути doomsday)";
+                            return true;
+                        }
+
+                        if (isDllDisguised && (hasClassFiles || hasManifest))
+                        {
+                            reason = "JAR-чит, замаскированный под .dll (PK-архив с байткодом Java для запуска через java -jar)";
                             return true;
                         }
                     }
+                    catch { }
 
-                    byte[] zipHead = new byte[Math.Min((int)len, 524288)];
+                    byte[] zipHead = new byte[Math.Min((int)len, 1048576)];
                     using (var fs = file.OpenRead())
                     {
                         fs.Read(zipHead, 0, zipHead.Length);
@@ -627,7 +687,15 @@ namespace AngelMineChecker
                     string headUtf8 = Encoding.UTF8.GetString(zipHead);
                     if (headUtf8.Contains("net/java/s.class") && headUtf8.Contains("net/java/f.class"))
                     {
-                        reason = "сигнатура Doomsday (net/java/s.class, f.class в байткоде)";
+                        reason = isDllDisguised
+                            ? "Doomsday, замаскированный под .dll (net/java/s.class, f.class в байткоде)"
+                            : "сигнатура Doomsday (net/java/s.class, f.class в байткоде)";
+                        return true;
+                    }
+
+                    if (isDllDisguised && (headUtf8.Contains("net/java/s.class") || headUtf8.Contains("net/java/f.class") || headUtf8.Contains("doomsday") || headUtf8.Contains("doomday")))
+                    {
+                        reason = "Doomsday, замаскированный под .dll (байткод Doomsday)";
                         return true;
                     }
                 }
@@ -1796,7 +1864,7 @@ namespace AngelMineChecker
                         }
                     }
 
-                    if (!matched && (name.EndsWith(".jar") || name.EndsWith(".zip") || name.EndsWith(".disabled")))
+                    if (!matched && (name.EndsWith(".jar") || name.EndsWith(".zip") || name.EndsWith(".dll") || name.EndsWith(".disabled") || name.EndsWith(".bak")))
                     {
                         try
                         {
@@ -1835,6 +1903,65 @@ namespace AngelMineChecker
             return warnings;
         }
 
+        public static int CheckActiveJavaAndCheatProcesses(Action<string> log, List<string> banReasons)
+        {
+            int threats = 0;
+            try
+            {
+                using (var searcher = new ManagementObjectSearcher("SELECT ProcessId, Name, CommandLine FROM Win32_Process"))
+                using (var objects = searcher.Get())
+                {
+                    foreach (ManagementObject obj in objects)
+                    {
+                        try
+                        {
+                            string pName = (obj["Name"] as string ?? "").ToLower();
+                            string cmd = obj["CommandLine"] as string ?? "";
+                            int pid = Convert.ToInt32(obj["ProcessId"]);
+                            if (string.IsNullOrEmpty(cmd)) continue;
+
+                            string cmdLower = cmd.ToLower();
+
+                            if (cmdLower.Contains("-jar") && cmdLower.Contains(".dll"))
+                            {
+                                log($"Найден активный процесс запуска JAR под видом DLL: {pName} (PID {pid}) -> {cmd}");
+                                banReasons.Add($"Запуск JAR под видом DLL (Doomsday) - {cmd}");
+                                threats++;
+                                continue;
+                            }
+
+                            if (cmdLower.Contains("doomsday") || cmdLower.Contains("doomday"))
+                            {
+                                log($"Найден активный процесс чита Doomsday: {pName} (PID {pid}) -> {cmd}");
+                                banReasons.Add($"Активный процесс Doomsday (PID {pid}) - {cmd}");
+                                threats++;
+                                continue;
+                            }
+
+                            if (pName == "java.exe")
+                            {
+                                foreach (var kw in CheatKeywords)
+                                {
+                                    if (cmdLower.Contains(kw))
+                                    {
+                                        if (kw == "impact" && (cmdLower.Contains("genshin") || cmdLower.Contains("hoyoverse"))) continue;
+                                        log($"Найден активный чит, запущенный через Java: {pName} (PID {pid}) -> {cmd}");
+                                        banReasons.Add($"Активный чит в Java - {cmd}");
+                                        threats++;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+
+            return threats;
+        }
+
         internal static int CheckSuspiciousProcesses(Action<string> log, List<string> banReasons)
         {
             int threats = 0;
@@ -1863,6 +1990,8 @@ namespace AngelMineChecker
                 }
             }
             catch { }
+
+            threats += CheckActiveJavaAndCheatProcesses(log, banReasons);
 
             return threats;
         }

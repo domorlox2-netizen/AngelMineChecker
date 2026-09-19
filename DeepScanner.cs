@@ -63,15 +63,15 @@ namespace AngelMineChecker
         {
             public string Name { get; set; }
             public bool IsSystemDlc { get; set; }
-            public byte[] AsciiBytes { get; set; }
-            public byte[] UnicodeBytes { get; set; }
+            public bool IsDoomsday { get; set; }
+            public byte[] AsciiBytesLower { get; set; }
 
-            public SearchPattern(string name, bool isSystemDlc = false)
+            public SearchPattern(string name, bool isSystemDlc = false, bool isDoomsday = false)
             {
                 Name = name;
                 IsSystemDlc = isSystemDlc;
-                AsciiBytes = Encoding.ASCII.GetBytes(name);
-                UnicodeBytes = Encoding.Unicode.GetBytes(name);
+                IsDoomsday = isDoomsday;
+                AsciiBytesLower = Encoding.ASCII.GetBytes(name.ToLowerInvariant());
             }
         }
 
@@ -82,8 +82,22 @@ namespace AngelMineChecker
 
         private static readonly List<SearchPattern> PrecompiledMemoryPatterns = new List<SearchPattern>
         {
+            new SearchPattern("trigger bot"),
             new SearchPattern("triggerbot"),
+            new SearchPattern("trigger_bot"),
+            new SearchPattern("aim assist"),
             new SearchPattern("aimassist"),
+            new SearchPattern("aim_assist"),
+            new SearchPattern("auto clicker"),
+            new SearchPattern("autoclicker"),
+            new SearchPattern("fastplace"),
+            new SearchPattern("fast place"),
+            new SearchPattern("net/java/s.class", false, true),
+            new SearchPattern("net/java/f.class", false, true),
+            new SearchPattern("net/java/s", false, true),
+            new SearchPattern("net/java/f", false, true),
+            new SearchPattern("doomsday", false, true),
+            new SearchPattern("doomday", false, true),
             new SearchPattern("dear imgui"),
             new SearchPattern("imgui::createcontext"),
             new SearchPattern("imgui_impl_win32"),
@@ -103,7 +117,7 @@ namespace AngelMineChecker
             "fontmanager.dll", "freetype.dll", "jimage.dll", "jsvml.dll", "sunmscapi.dll",
             "management.dll", "management_ext.dll", "javajpeg.dll", "lcms.dll", "jawt.dll",
             "extnet.dll", "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "ucrtbase.dll",
-            "attach.dll", "instrument.dll", "prefs.dll", "w2k_lsa_auth.dll", "sspi_bridge.dll"
+            "instrument.dll", "prefs.dll", "w2k_lsa_auth.dll", "sspi_bridge.dll"
         };
 
         public static async Task RunAsync(int? targetPid, Action<string> log)
@@ -733,6 +747,16 @@ namespace AngelMineChecker
                                         banReasons.Add($"Найден SystemDLC - {f} (сигнатура: {foundSig})");
                                     }
                                 }
+
+                                if (QuickScanner.CheckDoomsdayJar(fi, out string dReason))
+                                {
+                                    if (!seen.Contains(f))
+                                    {
+                                        seen.Add(f);
+                                        log($"Найден чит Doomsday: {Path.GetFileName(f)} ({f}) [{dReason}]");
+                                        banReasons.Add($"Найден Doomsday - {f} ({dReason})");
+                                    }
+                                }
                             }
                         }
                         catch { }
@@ -784,14 +808,37 @@ namespace AngelMineChecker
                         string lower = trimmed.ToLower();
 
                         bool found = false;
-                        foreach (var sc in suspiciousCmds)
+
+                        if ((lower.Contains("java") || lower.Contains("javaw")) && lower.Contains("-jar") && lower.Contains(".dll"))
                         {
-                            if (lower.Contains(sc))
+                            log($"Найден запуск JAR под видом DLL в истории PowerShell: {trimmed}");
+                            banReasons.Add($"Запуск JAR под видом DLL в PowerShell (Doomsday) - {trimmed}");
+                            found = true;
+                        }
+                        else if (lower.Contains("-jar") && lower.Contains(".dll"))
+                        {
+                            log($"Найден запуск JAR под видом DLL в истории PowerShell: {trimmed}");
+                            banReasons.Add($"Запуск JAR под видом DLL в PowerShell - {trimmed}");
+                            found = true;
+                        }
+                        else if (lower.Contains("doomsday") || lower.Contains("doomday"))
+                        {
+                            log($"Найден след запуска Doomsday в истории PowerShell: {trimmed}");
+                            banReasons.Add($"След запуска Doomsday в PowerShell - {trimmed}");
+                            found = true;
+                        }
+
+                        if (!found)
+                        {
+                            foreach (var sc in suspiciousCmds)
                             {
-                                log($"Найден след в истории командной строки (PSReadLine): {trimmed}");
-                                banReasons.Add($"След в истории PowerShell - {trimmed}");
-                                found = true;
-                                break;
+                                if (lower.Contains(sc))
+                                {
+                                    log($"Найден след в истории командной строки (PSReadLine): {trimmed}");
+                                    banReasons.Add($"След в истории PowerShell - {trimmed}");
+                                    found = true;
+                                    break;
+                                }
                             }
                         }
 
@@ -861,7 +908,7 @@ namespace AngelMineChecker
 
                     while (VirtualQueryEx(hProcess, address, out mbi, (uint)structSize) == structSize)
                     {
-                        if (sw.ElapsedMilliseconds > 3000 || scannedRegions > 300)
+                        if (sw.ElapsedMilliseconds > 8000 || scannedRegions > 1200)
                             break;
 
                         if (mbi.State == MEM_COMMIT &&
@@ -870,7 +917,7 @@ namespace AngelMineChecker
                             ((mbi.Protect & PAGE_READWRITE) != 0 || (mbi.Protect & PAGE_EXECUTE_READWRITE) != 0))
                         {
                             long regionBytes = mbi.RegionSize.ToInt64();
-                            long bytesToReadTotal = Math.Min(regionBytes, 2097152);
+                            long bytesToReadTotal = Math.Min(regionBytes, 8388608);
                             long offset = 0;
 
                             while (offset < bytesToReadTotal)
@@ -886,18 +933,23 @@ namespace AngelMineChecker
                                     {
                                         if (!foundSignatures.Contains(pat.Name))
                                         {
-                                            if (ContainsBytePattern(buffer, readLen, pat.AsciiBytes) ||
-                                                ContainsBytePattern(buffer, readLen, pat.UnicodeBytes))
+                                            if (ContainsAsciiCaseInsensitive(buffer, readLen, pat.AsciiBytesLower) ||
+                                                ContainsUnicodeCaseInsensitive(buffer, readLen, pat.AsciiBytesLower))
                                             {
                                                 foundSignatures.Add(pat.Name);
-                                                if (pat.IsSystemDlc)
+                                                if (pat.IsDoomsday)
+                                                {
+                                                    log($"Найден след Doomsday в памяти процесса PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
+                                                    banReasons.Add($"Найден след инжекта Doomsday в памяти процесса (PID {pid}) - {pat.Name}");
+                                                }
+                                                else if (pat.IsSystemDlc)
                                                 {
                                                     log($"Найден след SystemDLC в памяти процесса PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
                                                     banReasons.Add($"Найден след SystemDLC в памяти процесса (PID {pid}) - {pat.Name}");
                                                 }
                                                 else
                                                 {
-                                                    log($"Найдена сигнатура в памяти PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
+                                                    log($"Найдена сигнатура чита в памяти PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
                                                     banReasons.Add($"Найдена сигнатура чита в памяти (PID {pid}) - {pat.Name}");
                                                 }
                                             }
@@ -930,25 +982,66 @@ namespace AngelMineChecker
             });
         }
 
-        private static bool ContainsBytePattern(byte[] buffer, int length, byte[] pattern)
+        private static bool ContainsAsciiCaseInsensitive(byte[] buffer, int length, byte[] lowerPattern)
         {
-            if (pattern == null || pattern.Length == 0 || length < pattern.Length) return false;
-            byte first = pattern[0];
-            int max = length - pattern.Length;
+            if (lowerPattern == null || lowerPattern.Length == 0 || length < lowerPattern.Length) return false;
+            byte first = lowerPattern[0];
+            int max = length - lowerPattern.Length;
             for (int i = 0; i <= max; i++)
             {
-                if (buffer[i] == first)
+                byte b = buffer[i];
+                if (b >= 65 && b <= 90) b = (byte)(b + 32);
+                if (b == first)
                 {
                     bool match = true;
-                    for (int j = 1; j < pattern.Length; j++)
+                    for (int j = 1; j < lowerPattern.Length; j++)
                     {
-                        if (buffer[i + j] != pattern[j])
+                        byte bj = buffer[i + j];
+                        if (bj >= 65 && bj <= 90) bj = (byte)(bj + 32);
+                        if (bj != lowerPattern[j])
                         {
                             match = false;
                             break;
                         }
                     }
                     if (match) return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool ContainsUnicodeCaseInsensitive(byte[] buffer, int length, byte[] lowerPattern)
+        {
+            if (lowerPattern == null || lowerPattern.Length == 0) return false;
+            int patLen = lowerPattern.Length;
+            int unicodeBytesLen = patLen * 2;
+            if (length < unicodeBytesLen) return false;
+
+            byte first = lowerPattern[0];
+            int max = length - unicodeBytesLen;
+            for (int i = 0; i <= max; i++)
+            {
+                if (i + 1 < length && buffer[i + 1] == 0)
+                {
+                    byte b = buffer[i];
+                    if (b >= 65 && b <= 90) b = (byte)(b + 32);
+                    if (b == first)
+                    {
+                        bool match = true;
+                        for (int j = 1; j < patLen; j++)
+                        {
+                            int idx = i + j * 2;
+                            if (idx + 1 >= length || buffer[idx + 1] != 0) { match = false; break; }
+                            byte bj = buffer[idx];
+                            if (bj >= 65 && bj <= 90) bj = (byte)(bj + 32);
+                            if (bj != lowerPattern[j])
+                            {
+                                match = false;
+                                break;
+                            }
+                        }
+                        if (match) return true;
+                    }
                 }
             }
             return false;
@@ -1020,6 +1113,27 @@ namespace AngelMineChecker
 
                         bool cheatNameMatch = QuickScanner.CheatKeywords.Any(kw => modNameLower.Contains(kw)) ||
                                               suspiciousKeywords.Any(sk => modNameLower.Contains(sk));
+
+                        if (modNameLower == "attach.dll")
+                        {
+                            log($"Обнаружен след динамического подключения к JVM: attach.dll загружен в процесс PID {pid} (инжект внешнего чита/агента)");
+                            banReasons.Add($"Динамическое подключение к JVM (инжект) - attach.dll");
+                            continue;
+                        }
+
+                        try
+                        {
+                            var modFi = new FileInfo(modPath);
+                            if (modFi.Exists && modFi.Length > 0 && modFi.Length <= 35 * 1024 * 1024)
+                            {
+                                if (QuickScanner.CheckDoomsdayJar(modFi, out string dReason))
+                                {
+                                    log($"Обнаружен инжектированный модуль Doomsday: {modName} ({modPath}) [{dReason}]");
+                                    banReasons.Add($"Инжектирован модуль Doomsday - {modName} ({dReason})");
+                                }
+                            }
+                        }
+                        catch { }
 
                         if (cheatNameMatch || fromSuspiciousFolder)
                         {
