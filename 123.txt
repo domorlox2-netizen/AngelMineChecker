@@ -1,0 +1,68 @@
+qngOR4LLGyKpHanrK8257iBxbxMLILqj
+pOWYffAhUci9yTiGHi1bSrpFaRLbK6ZDT4vIk7vHrvEsDBcD6QT7POsEbLU9p0Ht
+ФОРМА: НИТКА LENGHT 
+КОПИРОВАТЬ БЕЗ ПРОБЕЛОВ, НИТКА И ПОСЛЕ НИТКИ НЕ ДОЛЖНО БЫТЬ НИКАКОГО СИМВОЛА (ПРОПУСК - ТОЖЕ СИМВОЛ [ ])
+
+3cZ8yz8CJ9uuhbLGNoP8WK 64 \ 64 \ 64 \ 8192 \ 8192
+
+65kB6yOHkqyIVHie0aJz 64 \ 66 \ 66 \ 8192 \ 8192
+
+77X7GjcoO4ls1YMc7VN7Fh1AWV7exvj 64 \ 64 \ 8192
+
+Be83IIp7HqD0FnuT6cMRXWq3ITh 64 \ 64 \ 8192
+
+BwXrWWLndVgXP3nCjl2T7 64 \ 64 \ 8192
+
+E1aTaHoeCvF0jiUMjljhOySuCDeDNiofTP0 64 \64 \ 64 \ 64 \ 8192 \ 8192
+
+KCfcPreShXlnj2mM7opNnNXU1 64 \ 64 \ 64 \ 8192 \ 8192
+
+M0aJQ9EgVBLjLlADgBC5JfMjvLS8CNvgZB 64 \ 64 \ 64 \ 65 \ 64 \ 68 \ 64 \ 8192 \ 8192 \ 8192 \ 8192
+
+N09dquWSSCG9ynxpcMggwnJ 64 \ 64 \ 8192
+
+N1Yer2oZeGUJqxIm04nrCNmwq 64 \ 64 \ 8192
+
+PqbsqY27KTVTy1Xqb5Qu9FC0 64 \ 64 \ 8192
+
+YMJ5m3rttKKSpwwLcVNd 64 \ 64 \ 8192
+
+YWCmzr2hnYumBIQi6Z6tiB 64 \ 64 \ 8192
+
+aBhR9NFYh42RCOhGjEshc3vy8ySusnMCg 64 \ 64 \ 65 \ 65 \ 8192 \ 8192
+
+cGJHcgcMLH16Zu5IMk7UYIewjrKj01poctpG 64 \ 64 \ 8192
+
+dmFcvYcNaY3KuzlCh2DK0BIAWIjN8 64 \ 64 \ 8192
+
+gg2v3Oa3pmFXxSSWbvF0 64 \ 64 \ 64 \ 8192 \ 8192
+
+ggQK7smmxq7LeCmYbDKROn6S4XHo
+
+i7S0WoWzDer3BYyRXFGq8 64 \ 64 \ 8192
+
+lIjhTaufwBC3j8y4YP0ih5nyp 64 \ 65 \ 65 \ 8192 \ 8192
+
+nlGrUNIITzTtE5hCWN31Ft1MUuFoFnJC4QjaeEAM 64 \ 64 \ 64 \ 8192 \ 8192
+
+plwGne3k2xIRR9ylbugeaJRSsTRa7ZKdOgV 64 \ 64 \ 65 \ 65 \ 64 \ 64 \ 8192 \ 8192
+
+qngOR4LLGyKpHanrK8257iBxbxMLILqj 64 \ 64 \ 8192
+
+qyTc3jia9nMEVCjA6BHsYId 64 \ 64 \ 65 \ 65 \ 8192 \ 8192
+
+s5h9gkjvwLCo2xSO0XE8Y9jz5CZa 64 \ 64 \ 8192
+
+sMxo38AGCNB483R4CPUZmxYJ17hwqUyBu 64 \ 65 \ 65 \ 8192 \ 8192
+
+sv6yaeCLf6G7VKHbnEBUVCrU 64 \ 64 \ 8192
+
+uaVGhewx0602RnDcS9esl2PStmbAVr 64 \ 64 \ 8192
+
+vgLxlB1s5LnZi9QdMdFIPtn6TD5AH4a8w7z11Or 64 \ 64 \ 8192
+
+y3426mpn375PMaoxUvKH 64 \ 64 \ 64 \ 8192 \ 8192
+
+yBFeXFluO2kzpPtm6ANtUX 64 \ 64 \ 66 \ 66 \ 8192 \ 8192
+
+pOWYffAhUci9yTiGHi1bSrpFaRLbK6ZDT4vIk7vHrvEsDBcD6QT7POsEbLU9p0Ht 64 \ 65 \ 64
