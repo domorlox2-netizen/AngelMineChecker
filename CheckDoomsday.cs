@@ -419,6 +419,42 @@ namespace AngelMineChecker
                                 threats++;
                                 continue;
                             }
+
+                            if (cmdLower.Contains("-jar "))
+                            {
+                                int jarIdx = cmd.IndexOf("-jar ", StringComparison.OrdinalIgnoreCase);
+                                if (jarIdx >= 0)
+                                {
+                                    string remainder = cmd.Substring(jarIdx + 5).Trim();
+                                    string jarTarget = "";
+                                    if (remainder.StartsWith("\""))
+                                    {
+                                        int endQuote = remainder.IndexOf('"', 1);
+                                        if (endQuote > 1) jarTarget = remainder.Substring(1, endQuote - 1);
+                                    }
+                                    else
+                                    {
+                                        int spaceIdx = remainder.IndexOf(' ');
+                                        jarTarget = spaceIdx > 0 ? remainder.Substring(0, spaceIdx) : remainder;
+                                    }
+
+                                    if (!string.IsNullOrEmpty(jarTarget) && File.Exists(jarTarget))
+                                    {
+                                        try
+                                        {
+                                            var fi = new FileInfo(jarTarget);
+                                            if (CheckFile(fi, out string jarReason))
+                                            {
+                                                log?.Invoke($"Найден активный процесс чита Doomsday ({fi.Name}): {pName} (PID {pid}) -> {cleanCmd}");
+                                                banReasons.Add($"Активный процесс Doomsday (PID {pid}, {fi.Name}: {jarReason})");
+                                                threats++;
+                                                continue;
+                                            }
+                                        }
+                                        catch { }
+                                    }
+                                }
+                            }
                         }
                         catch { }
                     }
