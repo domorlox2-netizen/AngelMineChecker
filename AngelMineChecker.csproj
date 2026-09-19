@@ -105,6 +105,8 @@
     <Compile Include="Scanners\DeepScanner.cs" />
     <Compile Include="Scanners\AccountScanner.cs" />
     <Compile Include="Scanners\CheckDoomsday.cs" />
+    <Compile Include="Scanners\CheckCortex.cs" />
+    <Compile Include="Scanners\CheckLuminar.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
