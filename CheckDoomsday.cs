@@ -663,54 +663,92 @@ namespace AngelMineChecker
 
                         if (jnaModules.Count == 0) continue;
 
+                        var moduleDescs = new List<string>();
                         bool hasSuspiciousJna = false;
-                        string detectedDetails = "";
 
-                        foreach (var mod in jnaModules)
+                        for (int i = 0; i < jnaModules.Count; i++)
                         {
-                            try
+                            var mod = jnaModules[i];
+                            string modName = "unknown";
+                            string filePath = "";
+
+                            try { modName = mod.ModuleName ?? "jna_module"; } catch { }
+                            try { filePath = mod.FileName ?? ""; } catch { }
+
+                            string modInfo;
+                            if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
                             {
-                                string filePath = mod.FileName;
-                                if (!File.Exists(filePath)) continue;
-
-                                var fi = new FileInfo(filePath);
-                                var vi = mod.FileVersionInfo;
-
-                                string desc = (vi.FileDescription ?? "").Trim();
-                                string ver = (vi.FileVersion ?? "").Trim();
-                                string prod = (vi.ProductName ?? "").Trim();
-
-                                bool emptyMeta = string.IsNullOrEmpty(desc) && string.IsNullOrEmpty(ver) && string.IsNullOrEmpty(prod);
-                                bool hasCompanionX = File.Exists(filePath + ".x");
-
-                                string sha256 = "";
-                                if (fi.Length > 0 && fi.Length < 20 * 1024 * 1024)
+                                try
                                 {
-                                    using (var sha = SHA256.Create())
-                                    using (var fs = fi.OpenRead())
+                                    var fi = new FileInfo(filePath);
+                                    var vi = mod.FileVersionInfo;
+
+                                    string desc = (vi?.FileDescription ?? "").Trim();
+                                    string ver = (vi?.FileVersion ?? "").Trim();
+                                    string prod = (vi?.ProductName ?? "").Trim();
+
+                                    bool emptyMeta = string.IsNullOrEmpty(desc) && string.IsNullOrEmpty(ver) && string.IsNullOrEmpty(prod);
+                                    bool hasCompanionX = File.Exists(filePath + ".x");
+
+                                    string sha256 = "";
+                                    if (fi.Length > 0 && fi.Length < 20 * 1024 * 1024)
                                     {
-                                        byte[] hashBytes = sha.ComputeHash(fs);
-                                        sha256 = BitConverter.ToString(hashBytes).Replace("-", "").ToUpperInvariant();
+                                        using (var sha = SHA256.Create())
+                                        using (var fs = fi.OpenRead())
+                                        {
+                                            byte[] hashBytes = sha.ComputeHash(fs);
+                                            sha256 = BitConverter.ToString(hashBytes).Replace("-", "").ToUpperInvariant();
+                                        }
                                     }
-                                }
 
-                                if (sha256 == "AD683F7AE2C912EF502FD802F256094FCEAA238260115CAAEFB1913A13ABD5E2" ||
-                                    (emptyMeta && fi.Length >= 300000 && fi.Length <= 450000) ||
-                                    (emptyMeta && hasCompanionX))
+                                    string flagReason = "";
+                                    if (sha256 == "AD683F7AE2C912EF502FD802F256094FCEAA238260115CAAEFB1913A13ABD5E2")
+                                    {
+                                        hasSuspiciousJna = true;
+                                        flagReason = "сигнатура Doomsday SHA256";
+                                    }
+                                    else if (emptyMeta && hasCompanionX)
+                                    {
+                                        hasSuspiciousJna = true;
+                                        flagReason = "Doomsday companion .x";
+                                    }
+                                    else if (emptyMeta && fi.Length >= 300000 && fi.Length <= 450000)
+                                    {
+                                        hasSuspiciousJna = true;
+                                        flagReason = "аномальный размер и пустые метаданные";
+                                    }
+
+                                    string sizeStr = $"{fi.Length / 1024} КБ";
+                                    string timeStr = fi.CreationTime.ToString("dd.MM.yyyy HH:mm:ss");
+                                    string note = !string.IsNullOrEmpty(flagReason) ? $", {flagReason}" : "";
+
+                                    modInfo = $"{modName} [{filePath}] ({sizeStr}, {timeStr}{note})";
+                                }
+                                catch
                                 {
-                                    hasSuspiciousJna = true;
-                                    detectedDetails = $"{mod.ModuleName} ({fi.CreationTime:HH:mm:ss})";
-                                    break;
+                                    modInfo = $"{modName} [{filePath}]";
                                 }
                             }
-                            catch { }
+                            else
+                            {
+                                modInfo = string.IsNullOrEmpty(filePath) ? modName : $"{modName} [{filePath}]";
+                            }
+
+                            moduleDescs.Add(modInfo);
                         }
 
                         if (hasSuspiciousJna || jnaModules.Count > 1)
                         {
-                            string detail = !string.IsNullOrEmpty(detectedDetails) ? detectedDetails : $"{jnaModules.Count} JNA модулей";
-                            log?.Invoke($"Обнаружен инжект Doomsday через JNA native в процессе PID {pid}: {detail}");
-                            banReasons.Add($"Инжект Doomsday в процесс PID {pid} (модуль {detail})");
+                            log?.Invoke($"Обнаружен инжект Doomsday через JNA native в процессе PID {pid} ({jnaModules.Count} JNA модулей):");
+                            foreach (var md in moduleDescs)
+                            {
+                                log?.Invoke($"  -> {md}");
+                            }
+
+                            for (int i = 0; i < moduleDescs.Count; i++)
+                            {
+                                banReasons.Add($"Инжект Doomsday в процесс PID {pid} (модуль #{i + 1}: {moduleDescs[i]})");
+                            }
                             found++;
                         }
                     }
