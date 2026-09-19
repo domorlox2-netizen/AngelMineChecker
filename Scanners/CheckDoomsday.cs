@@ -73,64 +73,32 @@ namespace AngelMineChecker
 
         private static readonly MemorySignature[] JvmMemorySignatures = new[]
         {
-            new MemorySignature("0 1 /", "class"),
-            new MemorySignature("0 1 .", "class"),
-            new MemorySignature("gqgv3", "classloader"),
-            new MemorySignature("dd2o", "classloader"),
-            new MemorySignature("gqgd4", "class"),
-            new MemorySignature("gqgi", "class"),
-            new MemorySignature("post /font/", "font"),
-            new MemorySignature("get /font/", "font"),
-            new MemorySignature("/font/arial_", "font"),
-            new MemorySignature("/font/arial", "font"),
-            new MemorySignature("/font/tahoma", "font"),
-            new MemorySignature("arial_3_128_2.png", "font"),
+            new MemorySignature("com/doomsday/tweaker", "class"),
+            new MemorySignature("com/doomsday", "class"),
             new MemorySignature("host: doomsdayclient.xyz", "network"),
             new MemorySignature("host: doomsdayclient.com", "network"),
             new MemorySignature("https://doomsdayclient.xyz", "network"),
             new MemorySignature("http://doomsdayclient.xyz", "network"),
             new MemorySignature("doomsdayclient.xyz", "network"),
             new MemorySignature("doomsdayclient.com", "network"),
-            new MemorySignature("cookie: data=", "network"),
             new MemorySignature("doomsday loaded successfully", "cheat"),
             new MemorySignature("starting inject shellcode", "cheat"),
             new MemorySignature("injected! loading...", "cheat"),
             new MemorySignature("--doomsdayargs", "cheat"),
             new MemorySignature("--doomsdayversion", "cheat"),
             new MemorySignature("--clickguikey", "cheat"),
-            new MemorySignature("com/doomsday/tweaker", "cheat"),
-            new MemorySignature("com/doomsday", "cheat"),
             new MemorySignature("failed to inject jvmti agent", "cheat"),
             new MemorySignature("z4mfltptb", "cheat"),
-            new MemorySignature("net/java/s", "class"),
-            new MemorySignature("net/java/f", "class"),
-            new MemorySignature("net/java/n", "class"),
-            new MemorySignature("net/java/l", "class"),
-            new MemorySignature("net/java/g", "class"),
-            new MemorySignature("net/java/h", "class"),
-            new MemorySignature("net/java/k", "class"),
-            new MemorySignature("net/java/r", "class"),
-            new MemorySignature("premain-class: net.java", "agent"),
-            new MemorySignature("splashscreen-image: l.png", "cheat")
+            new MemorySignature("arial_3_128_2.png", "font")
         };
 
         private static readonly byte[][] MemoryAnchors = new[]
         {
-            Encoding.ASCII.GetBytes("0 1 /"),
-            Encoding.ASCII.GetBytes("0 1 ."),
-            Encoding.ASCII.GetBytes("gqg"),
-            Encoding.ASCII.GetBytes("dd2o"),
             Encoding.ASCII.GetBytes("doomsday"),
             Encoding.ASCII.GetBytes("z4mfltptb"),
-            Encoding.ASCII.GetBytes("/font/"),
-            Encoding.ASCII.GetBytes("arial_"),
-            Encoding.ASCII.GetBytes("cookie: data="),
             Encoding.ASCII.GetBytes("shellcode"),
-            Encoding.ASCII.GetBytes("inject"),
             Encoding.ASCII.GetBytes("--clickgui"),
-            Encoding.ASCII.GetBytes("net/java/"),
-            Encoding.ASCII.GetBytes("premain-class"),
-            Encoding.ASCII.GetBytes("splashscreen-image")
+            Encoding.ASCII.GetBytes("arial_3_128_2")
         };
 
         public static bool CheckFile(FileInfo file, out string reason)
@@ -628,6 +596,15 @@ namespace AngelMineChecker
                         {
                             try
                             {
+                                string fileName = Path.GetFileName(af);
+                                if (int.TryParse(fileName.Replace(".attach_pid", ""), out int afPid))
+                                {
+                                    lock (_findingsLock)
+                                    {
+                                        if (_jcmdQueriedPids.Contains(afPid)) continue;
+                                    }
+                                }
+
                                 var fi = new FileInfo(af);
                                 if (DateTime.Now - fi.LastWriteTime < TimeSpan.FromHours(4))
                                 {
@@ -749,6 +726,17 @@ namespace AngelMineChecker
                             string output = p.StandardOutput.ReadToEnd();
                             p.WaitForExit(3500);
 
+                            lock (_findingsLock)
+                            {
+                                _jcmdQueriedPids.Add(pid);
+                            }
+                            try
+                            {
+                                string attachPath = Path.Combine(Path.GetTempPath(), $".attach_pid{pid}");
+                                if (File.Exists(attachPath)) File.Delete(attachPath);
+                            }
+                            catch { }
+
                             if (string.IsNullOrEmpty(output)) continue;
 
                             using (var reader = new StringReader(output))
@@ -762,19 +750,31 @@ namespace AngelMineChecker
                                     bool isSus = false;
                                     string clInfo = "";
 
-                                    if (trimmed.Contains("0 1 .") || trimmed.Contains("gqg") || trimmed.Contains("dd2o") ||
-                                        trimmed.Contains("net.java") || trimmed.Contains("doomsday"))
+                                    if (trimmed.IndexOf("doomsday", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                        trimmed.IndexOf("z4mfltptb", StringComparison.OrdinalIgnoreCase) >= 0)
                                     {
                                         isSus = true;
                                         clInfo = trimmed;
                                     }
-                                    else if ((trimmed.Contains("\t") || trimmed.Contains("   ")) &&
-                                             (trimmed.Contains("0x0000000800053298") || trimmed.Contains("ClassLoaders$AppClassLoader")) &&
-                                             !trimmed.Contains("jdk.internal") && !trimmed.Contains("net.fabricmc") &&
-                                             !trimmed.Contains("cpw.mods") && !trimmed.Contains("net.minecraftforge"))
+                                    else if (!trimmed.Contains("jdk.internal") && !trimmed.Contains("net.fabricmc") &&
+                                             !trimmed.Contains("cpw.mods") && !trimmed.Contains("net.minecraftforge") &&
+                                             !trimmed.Contains("org.spongepowered") && !trimmed.Contains("net.minecraft") &&
+                                             !trimmed.Contains("com.mojang") && !trimmed.Contains("org.bukkit") &&
+                                             !trimmed.Contains("net.md_5") && !trimmed.Contains("io.papermc") &&
+                                             !trimmed.Contains("org.apache") && !trimmed.Contains("org.slf4j"))
                                     {
-                                        isSus = true;
-                                        clInfo = trimmed;
+                                        string[] cols = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                                        if (cols.Length >= 4 && int.TryParse(cols[3], out int classCount) && classCount >= 800)
+                                        {
+                                            isSus = true;
+                                            clInfo = trimmed;
+                                        }
+                                        else if ((trimmed.Contains("0x0000000800053298") || trimmed.Contains("ClassLoaders$AppClassLoader")) &&
+                                                 cols.Length >= 4 && int.TryParse(cols[3], out int cc) && cc >= 500)
+                                        {
+                                            isSus = true;
+                                            clInfo = trimmed;
+                                        }
                                     }
 
                                     if (isSus)
@@ -1357,6 +1357,7 @@ namespace AngelMineChecker
 
         private static readonly object _findingsLock = new object();
         private static readonly List<string> _lastDetailedFindings = new List<string>();
+        private static readonly HashSet<int> _jcmdQueriedPids = new HashSet<int>();
 
         public static List<string> GetLastDetailedFindings()
         {
@@ -1420,6 +1421,11 @@ namespace AngelMineChecker
         public static async Task<int> RunDoomsdayCheckAsync(Action<string> log, List<string> banReasons, int? targetPid = null)
         {
             log?.Invoke("Поиск инжектов думика");
+
+            lock (_findingsLock)
+            {
+                _jcmdQueriedPids.Clear();
+            }
 
             int totalFound = 0;
             var internalReasons = new List<string>();
