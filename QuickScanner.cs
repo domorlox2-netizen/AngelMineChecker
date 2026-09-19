@@ -2180,16 +2180,21 @@ namespace AngelMineChecker
                             }
                         }
 
-                        if (!matched && (name.EndsWith(".jar") || name.EndsWith(".zip") || name.EndsWith(".disabled")))
+                        if (!matched)
                         {
                             try
                             {
-                                if (CheckDoomsdayJar(new FileInfo(f), out string dReason))
+                                var fi = new FileInfo(f);
+                                if ((fi.Length >= 1024 * 1024 && fi.Length <= 10 * 1024 * 1024) ||
+                                    name.EndsWith(".jar") || name.EndsWith(".zip") || name.EndsWith(".disabled") || name.EndsWith(".dll") || name.EndsWith(".bak") || name.EndsWith(".dat"))
                                 {
-                                    log($"Найден в загрузках чит Doomsday: {Path.GetFileName(f)} ({dReason})");
-                                    banReasons.Add($"Найден Doomsday - {f} ({dReason})");
-                                    warnings++;
-                                    matched = true;
+                                    if (CheckDoomsdayJar(fi, out string dReason))
+                                    {
+                                        log($"Найден в загрузках чит Doomsday: {Path.GetFileName(f)} ({dReason})");
+                                        banReasons.Add($"Найден Doomsday - {f} ({dReason})");
+                                        warnings++;
+                                        matched = true;
+                                    }
                                 }
                             }
                             catch { }

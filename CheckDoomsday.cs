@@ -94,23 +94,32 @@ namespace AngelMineChecker
             new MemorySignature("--clickguikey", "cheat"),
             new MemorySignature("com/doomsday/tweaker", "cheat"),
             new MemorySignature("failed to inject jvmti agent", "cheat"),
+            new MemorySignature("z4mfltptb", "cheat"),
             new MemorySignature("net/java/s", "class"),
             new MemorySignature("net/java/f", "class"),
             new MemorySignature("net/java/n", "class"),
             new MemorySignature("net/java/l", "class"),
-            new MemorySignature("net/java/g", "class")
+            new MemorySignature("net/java/g", "class"),
+            new MemorySignature("net/java/h", "class"),
+            new MemorySignature("net/java/k", "class"),
+            new MemorySignature("net/java/r", "class"),
+            new MemorySignature("premain-class: net.java", "agent"),
+            new MemorySignature("splashscreen-image: l.png", "cheat")
         };
 
         private static readonly byte[][] MemoryAnchors = new[]
         {
             Encoding.ASCII.GetBytes("doomsday"),
+            Encoding.ASCII.GetBytes("z4mfltptb"),
             Encoding.ASCII.GetBytes("/font/"),
             Encoding.ASCII.GetBytes("arial_"),
             Encoding.ASCII.GetBytes("cookie: data="),
             Encoding.ASCII.GetBytes("shellcode"),
             Encoding.ASCII.GetBytes("inject"),
             Encoding.ASCII.GetBytes("--clickgui"),
-            Encoding.ASCII.GetBytes("net/java/")
+            Encoding.ASCII.GetBytes("net/java/"),
+            Encoding.ASCII.GetBytes("premain-class"),
+            Encoding.ASCII.GetBytes("splashscreen-image")
         };
 
         public static bool CheckFile(FileInfo file, out string reason)
@@ -122,6 +131,7 @@ namespace AngelMineChecker
             {
                 long len = file.Length;
                 if (len == 0 || len > 50 * 1024 * 1024) return false;
+                if (file.Name.Equals("launcher.jar", StringComparison.OrdinalIgnoreCase)) return false;
 
                 string ext = file.Extension.ToLower();
 
@@ -228,13 +238,17 @@ namespace AngelMineChecker
                                 }
 
                                 if (eName == "net/java/s.class" || eName == "net/java/f.class" ||
-                                    eName == "net/java/r.class" || eName == "net/java/h.class")
+                                    eName == "net/java/r.class" || eName == "net/java/h.class" ||
+                                    eName == "net/java/g.class" || eName == "net/java/l.class")
                                 {
                                     hasNetJava = true;
                                 }
 
-                                if (eName.Contains("doomsday") || eName.Contains("doomday"))
+                                if ((eName.Contains("doomsday") || eName.Contains("doomday")) &&
+                                    !eName.Contains("doomsdaymanager") && !eName.Contains("legacylauncher"))
+                                {
                                     hasDoomsdayPath = true;
+                                }
 
                                 if (eName == "meta-inf/manifest.mf" || eName.EndsWith("/manifest.mf"))
                                 {
@@ -286,9 +300,21 @@ namespace AngelMineChecker
                             return true;
                         }
 
+                        if (hasNetJava && (hasFabricJsonDd || hasModsTomlDd || hasMcmodInfoDd))
+                        {
+                            reason = "сигнатура Doomsday (net/java + mod metadata dd)";
+                            return true;
+                        }
+
                         if (hasDoomsdayPath)
                         {
                             reason = "внутренние пути Doomsday в архиве";
+                            return true;
+                        }
+
+                        if (file.Name.IndexOf("z4mfltptb", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            reason = "сигнатура сборки Doomsday (z4mfltptb)";
                             return true;
                         }
                     }
@@ -923,59 +949,226 @@ namespace AngelMineChecker
             int found = 0;
             try
             {
-                var dirsToCheck = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                var scannedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var foundCheats = new List<string>();
+
+                void ScanCandidateFile(string filePath)
                 {
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
+                    if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) return;
+                    lock (scannedFiles)
+                    {
+                        if (!scannedFiles.Add(filePath)) return;
+                    }
+
+                    try
+                    {
+                        var fi = new FileInfo(filePath);
+                        long len = fi.Length;
+                        if (len < 20000 || len > 15 * 1024 * 1024) return;
+
+                        if (CheckFile(fi, out string reason))
+                        {
+                            string desc = $"Найден чит Doomsday: {fi.Name} ({reason}) [{fi.FullName}]";
+                            lock (foundCheats)
+                            {
+                                foundCheats.Add(desc);
+                            }
+                            log?.Invoke(desc);
+                            banReasons.Add($"Найден чит Doomsday - {fi.FullName} ({reason})");
+                        }
+                    }
+                    catch { }
+                }
+
+                string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                var userSearchDirs = new List<string>
+                {
+                    Path.Combine(userProfile, "Downloads"),
+                    Path.Combine(userProfile, "Загрузки"),
                     Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-                    Path.GetTempPath()
+                    Path.Combine(userProfile, "Рабочий стол"),
+                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                    Path.Combine(userProfile, "Документы"),
+                    Path.Combine(userProfile, "Pictures"),
+                    Path.Combine(userProfile, "Изображения"),
+                    Path.Combine(userProfile, "Рисунки"),
+                    Path.Combine(userProfile, "Videos"),
+                    Path.Combine(userProfile, "Видео"),
+                    Path.Combine(userProfile, "Music"),
+                    Path.Combine(userProfile, "Музыка"),
+                    Path.Combine(userProfile, "Saved Games"),
+                    Path.Combine(userProfile, "Сохраненные игры"),
+                    Path.Combine(userProfile, "Favorites"),
+                    Path.Combine(userProfile, "Links"),
+                    Path.Combine(userProfile, "Contacts"),
+                    Path.Combine(userProfile, "Searches"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ".minecraft"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ".tlauncher"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ".lunarclient"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ".feather"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrismLauncher"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ModrinthApp"),
+                    Path.GetTempPath(),
+                    @"C:\Temp"
                 };
 
                 try
                 {
-                    foreach (var drive in DriveInfo.GetDrives())
+                    if (Directory.Exists(userProfile))
                     {
-                        if (drive.IsReady && (drive.DriveType == DriveType.Fixed || drive.DriveType == DriveType.Removable))
+                        foreach (var d in Directory.GetDirectories(userProfile))
                         {
-                            string r = drive.RootDirectory.FullName;
-                            string dl1 = Path.Combine(r, "Downloads");
-                            if (Directory.Exists(dl1)) dirsToCheck.Add(dl1);
-                            string dl2 = Path.Combine(r, "Загрузки");
-                            if (Directory.Exists(dl2)) dirsToCheck.Add(dl2);
-                            string dt1 = Path.Combine(r, "Desktop");
-                            if (Directory.Exists(dt1)) dirsToCheck.Add(dt1);
-                            string dt2 = Path.Combine(r, "Рабочий стол");
-                            if (Directory.Exists(dt2)) dirsToCheck.Add(dt2);
+                            string dn = Path.GetFileName(d);
+                            if (!dn.Equals("AppData", StringComparison.OrdinalIgnoreCase) &&
+                                !dn.StartsWith(".") && !dn.StartsWith("$"))
+                            {
+                                userSearchDirs.Add(d);
+                            }
+                        }
+
+                        foreach (var f in Directory.GetFiles(userProfile))
+                        {
+                            ScanCandidateFile(f);
                         }
                     }
                 }
                 catch { }
 
-                foreach (var dir in dirsToCheck)
+                foreach (var drive in DriveInfo.GetDrives())
                 {
-                    if (!Directory.Exists(dir)) continue;
+                    if (drive.IsReady && (drive.DriveType == DriveType.Fixed || drive.DriveType == DriveType.Removable))
+                    {
+                        string r = drive.RootDirectory.FullName;
+                        string t = Path.Combine(r, "Temp");
+                        if (Directory.Exists(t)) userSearchDirs.Add(t);
+                        string g = Path.Combine(r, "Games");
+                        if (Directory.Exists(g)) userSearchDirs.Add(g);
+                        string mc = Path.Combine(r, "Minecraft");
+                        if (Directory.Exists(mc)) userSearchDirs.Add(mc);
+                    }
+                }
+
+                var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jar", ".zip", ".dll", ".disabled", ".bak", ".dat", ".bin" };
+
+                void ScanDirectoryRecursive(string dirPath, int maxDepth, int currentDepth = 0)
+                {
+                    if (currentDepth > maxDepth || !Directory.Exists(dirPath)) return;
+
+                    string dirName = Path.GetFileName(dirPath);
+                    if (dirName.Equals("Windows", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.Equals("Program Files", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.Equals("Program Files (x86)", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.Equals("System Volume Information", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.Equals("Microsoft", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.Equals("Packages", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.Equals("Package", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.Equals("node_modules", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.Equals(".git", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.StartsWith("$"))
+                    {
+                        return;
+                    }
 
                     try
                     {
-                        var files = Directory.GetFiles(dir);
-                        foreach (var f in files)
+                        foreach (var f in Directory.GetFiles(dirPath))
                         {
                             try
                             {
-                                var fi = new FileInfo(f);
-                                if (fi.Length < 20000 || fi.Length > 50 * 1024 * 1024) continue;
-
-                                if (CheckFile(fi, out string reason))
+                                string ext = Path.GetExtension(f);
+                                if (exts.Contains(ext) || f.IndexOf("doomsday", StringComparison.OrdinalIgnoreCase) >= 0 || f.IndexOf("z4mfltptb", StringComparison.OrdinalIgnoreCase) >= 0)
                                 {
-                                    log?.Invoke($"Найден чит Doomsday: {Path.GetFileName(f)} ({reason}) [{f}]");
-                                    banReasons.Add($"Найден чит Doomsday - {f} ({reason})");
-                                    found++;
+                                    ScanCandidateFile(f);
+                                }
+                                else
+                                {
+                                    var fi = new FileInfo(f);
+                                    if (fi.Length >= 1024 * 1024 && fi.Length <= 10 * 1024 * 1024)
+                                    {
+                                        ScanCandidateFile(f);
+                                    }
                                 }
                             }
                             catch { }
                         }
                     }
                     catch { }
+
+                    if (currentDepth < maxDepth)
+                    {
+                        try
+                        {
+                            foreach (var subDir in Directory.GetDirectories(dirPath))
+                            {
+                                ScanDirectoryRecursive(subDir, maxDepth, currentDepth + 1);
+                            }
+                        }
+                        catch { }
+                    }
                 }
+
+                var parallelTasks = new List<Task>();
+                foreach (var dir in userSearchDirs.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    if (Directory.Exists(dir))
+                    {
+                        parallelTasks.Add(Task.Run(() => ScanDirectoryRecursive(dir, 4, 0)));
+                    }
+                }
+
+                foreach (var drive in DriveInfo.GetDrives())
+                {
+                    if (drive.IsReady && (drive.DriveType == DriveType.Fixed || drive.DriveType == DriveType.Removable))
+                    {
+                        string r = drive.RootDirectory.FullName;
+                        parallelTasks.Add(Task.Run(() =>
+                        {
+                            try
+                            {
+                                foreach (var f in Directory.GetFiles(r))
+                                {
+                                    string ext = Path.GetExtension(f);
+                                    if (exts.Contains(ext))
+                                    {
+                                        ScanCandidateFile(f);
+                                    }
+                                    else
+                                    {
+                                        var fi = new FileInfo(f);
+                                        if (fi.Length >= 1024 * 1024 && fi.Length <= 10 * 1024 * 1024)
+                                        {
+                                            ScanCandidateFile(f);
+                                        }
+                                    }
+                                }
+                            }
+                            catch { }
+
+                            try
+                            {
+                                foreach (var d in Directory.GetDirectories(r))
+                                {
+                                    string dn = Path.GetFileName(d);
+                                    if (dn.Equals("Windows", StringComparison.OrdinalIgnoreCase) ||
+                                        dn.Equals("Program Files", StringComparison.OrdinalIgnoreCase) ||
+                                        dn.Equals("Program Files (x86)", StringComparison.OrdinalIgnoreCase) ||
+                                        dn.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
+                                        dn.Equals("System Volume Information", StringComparison.OrdinalIgnoreCase) ||
+                                        dn.StartsWith("$"))
+                                    {
+                                        continue;
+                                    }
+                                    ScanDirectoryRecursive(d, 3, 0);
+                                }
+                            }
+                            catch { }
+                        }));
+                    }
+                }
+
+                Task.WaitAll(parallelTasks.ToArray(), 15000);
+                found = foundCheats.Count;
             }
             catch { }
 
@@ -1016,7 +1209,7 @@ namespace AngelMineChecker
 
                     bool matchesHeading = line.Contains("Инжект думика обнаружен") || line.Contains("Следы Doomsday обнаружены");
 
-                    if (!bodyDetailsInserted && !inSummary && matchesHeading)
+                    if (!bodyDetailsInserted && !inSummary && matchesHeading && !originalLog.Contains("           -> Найден след:"))
                     {
                         sb.AppendLine(line);
                         bodyDetailsInserted = true;
@@ -1046,53 +1239,48 @@ namespace AngelMineChecker
 
         public static async Task<int> RunDoomsdayCheckAsync(Action<string> log, List<string> banReasons, int? targetPid = null)
         {
-            log?.Invoke("Проверка doomsday");
+            log?.Invoke("Поиск инжектов думика");
 
-            int activeInjectionFound = 0;
-            int tracesFound = 0;
+            int totalFound = 0;
             var internalReasons = new List<string>();
 
             await Task.Run(() =>
             {
-                activeInjectionFound += CheckActiveProcesses(null, internalReasons);
-                activeInjectionFound += CheckJnaModules(targetPid, null, internalReasons);
-                activeInjectionFound += CheckLoopbackPorts(targetPid, null, internalReasons);
-                activeInjectionFound += CheckJvmAttach(null, internalReasons);
-                activeInjectionFound += CheckJvmMemory(targetPid, null, internalReasons);
-
-                tracesFound += CheckConhostMemory(null, internalReasons);
-                tracesFound += CheckFileSystemTraces(null, internalReasons);
+                totalFound += CheckActiveProcesses(null, internalReasons);
+                totalFound += CheckJnaModules(targetPid, null, internalReasons);
+                totalFound += CheckLoopbackPorts(targetPid, null, internalReasons);
+                totalFound += CheckJvmAttach(null, internalReasons);
+                totalFound += CheckJvmMemory(targetPid, null, internalReasons);
+                totalFound += CheckConhostMemory(null, internalReasons);
+                totalFound += CheckFileSystemTraces(null, internalReasons);
 
                 var dnsReasons = new List<string>();
                 int dnsFound = CheckDnsCache(null, dnsReasons);
-                if ((activeInjectionFound > 0 || tracesFound > 0) && dnsFound > 0)
+                if (internalReasons.Count > 0 && dnsFound > 0)
                 {
                     internalReasons.AddRange(dnsReasons);
-                    tracesFound += dnsFound;
+                    totalFound += dnsFound;
                 }
             });
 
-            int totalFound = activeInjectionFound + tracesFound;
-            if (activeInjectionFound > 0)
+            if (totalFound > 0 || internalReasons.Count > 0)
             {
+                var distinctReasons = internalReasons.Distinct().ToList();
                 lock (_findingsLock)
                 {
                     _lastDetailedFindings.Clear();
-                    _lastDetailedFindings.AddRange(internalReasons.Distinct());
+                    _lastDetailedFindings.AddRange(distinctReasons);
                 }
                 log?.Invoke("Инжект думика обнаружен");
-                banReasons.Add("Инжект думика обнаружен");
-                return Math.Max(totalFound, internalReasons.Count);
-            }
-            else if (tracesFound > 0 || internalReasons.Count > 0)
-            {
-                lock (_findingsLock)
+                foreach (var reason in distinctReasons)
                 {
-                    _lastDetailedFindings.Clear();
-                    _lastDetailedFindings.AddRange(internalReasons.Distinct());
+                    log?.Invoke($"           -> Найден след: {reason}");
                 }
-                log?.Invoke("Следы Doomsday обнаружены");
-                banReasons.Add("Следы Doomsday обнаружены");
+                banReasons.Add("Инжект думика обнаружен");
+                foreach (var reason in distinctReasons)
+                {
+                    banReasons.Add($"  * {reason}");
+                }
                 return Math.Max(totalFound, internalReasons.Count);
             }
             else
