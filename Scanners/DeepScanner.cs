@@ -149,6 +149,7 @@ namespace AngelMineChecker
 
             QuickScanner.CheckRecentDownloads(log, banReasons);
             QuickScanner.CheckSuspiciousProcesses(log, banReasons);
+            QuickScanner.CheckPulseVisual(log, banReasons);
 
             log("Проверка системных служб");
             await Task.Delay(250);
@@ -1000,7 +1001,7 @@ namespace AngelMineChecker
                     "$Recycle.Bin"
                 };
 
-                var suspiciousKeywords = new[] { "inject", "hook", "hack", "cheat", "loader", "bypass", "systemdlc", "jlivef", "doomsday", "celestial", "nursultan", "deadcode", "rich", "expensive", "minced" };
+                var suspiciousKeywords = new[] { "inject", "hook", "hack", "cheat", "loader", "bypass", "systemdlc", "jlivef", "doomsday", "celestial", "nursultan", "deadcode", "rich", "expensive", "minced", "pulse visual", "pulsevisual" };
 
                 IntPtr[] hMods = new IntPtr[1024];
                 uint cb = (uint)(IntPtr.Size * hMods.Length);

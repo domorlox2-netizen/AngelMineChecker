@@ -22,7 +22,9 @@ namespace AngelMineChecker
             "meteor", "bleachhack", "liquidbounce", "matrix",
             "fluegel", "flügel", "zamorozka", "neverlose", "exhi",
             "xros", "minced", "excellent", "vape",
-            "doomsday", "doomday", "jlivef"
+            "doomsday", "doomday", "jlivef",
+            "pulse visual", "pulsevisual", "pulse-visual", "pulse_visual",
+            "pulse visuals", "pulsevisuals", "pulse-visuals", "pulse_visuals"
         };
 
         private static readonly Dictionary<string, HashSet<string>> DetectedCheatFolders = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
@@ -150,6 +152,7 @@ namespace AngelMineChecker
 
             CheckRecentDownloads(log, banReasons);
             CheckSuspiciousProcesses(log, banReasons);
+            CheckPulseVisual(log, banReasons);
 
             await CheckDoomsday.RunDoomsdayCheckAsync(log, banReasons);
 
@@ -2217,6 +2220,222 @@ namespace AngelMineChecker
             catch { }
 
             return threats;
+        }
+
+        internal static void CheckPulseVisual(Action<string> log, List<string> banReasons)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+            var candidateDirs = new List<string>
+            {
+                Path.Combine(appData, "Pulse Visual"),
+                Path.Combine(appData, "pulse visual"),
+                Path.Combine(appData, "PulseVisual"),
+                Path.Combine(appData, "pulsevisual"),
+                Path.Combine(appData, ".pulsevisual"),
+                Path.Combine(appData, ".pulse_visual"),
+                Path.Combine(appData, "Pulse Visuals"),
+                Path.Combine(appData, "PulseVisuals"),
+                Path.Combine(localAppData, "Pulse Visual"),
+                Path.Combine(localAppData, "pulse visual"),
+                Path.Combine(localAppData, "PulseVisual"),
+                Path.Combine(localAppData, "pulsevisual"),
+                Path.Combine(localAppData, ".pulsevisual"),
+                Path.Combine(localAppData, "Programs", "Pulse Visual"),
+                Path.Combine(localAppData, "Programs", "PulseVisual"),
+                Path.Combine(userProfile, "Pulse Visual"),
+                Path.Combine(userProfile, "pulse visual"),
+                Path.Combine(userProfile, "PulseVisual"),
+                Path.Combine(userProfile, "pulsevisual"),
+                Path.Combine(userProfile, ".pulsevisual"),
+                Path.Combine(userProfile, ".pulse_visual"),
+                Path.Combine(appData, ".minecraft", "Pulse Visual"),
+                Path.Combine(appData, ".minecraft", "pulse visual"),
+                Path.Combine(appData, ".minecraft", "PulseVisual"),
+                Path.Combine(appData, ".minecraft", "pulsevisual"),
+                Path.Combine(appData, ".minecraft", "config", "Pulse Visual"),
+                Path.Combine(appData, ".minecraft", "config", "pulsevisual"),
+                Path.Combine(appData, ".minecraft", "config", "pulse_visual"),
+                Path.Combine(appData, ".minecraft", "config", "PulseVisual")
+            };
+
+            foreach (var d in candidateDirs)
+            {
+                try
+                {
+                    if (Directory.Exists(d) && !IsCheckerOrSelf(d))
+                    {
+                        if (seen.Add(d))
+                        {
+                            log($"Найден: Папка {Path.GetFileName(d)} ({d})");
+                            banReasons.Add($"Найдена папка чита - {Path.GetFileName(d)} ({d})");
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            var rootChecks = new[] { userProfile, appData, localAppData, Path.Combine(appData, ".minecraft") };
+            foreach (var root in rootChecks)
+            {
+                if (!Directory.Exists(root)) continue;
+                try
+                {
+                    foreach (var sub in Directory.GetDirectories(root))
+                    {
+                        if (IsCheckerOrSelf(sub)) continue;
+                        string sName = Path.GetFileName(sub).ToLower();
+                        if (sName.Contains("pulse visual") || sName.Contains("pulsevisual") ||
+                            sName.Contains("pulse_visual") || sName.Contains("pulse-visual") ||
+                            sName.Contains("pulse visuals") || sName.Contains("pulsevisuals"))
+                        {
+                            if (seen.Add(sub))
+                            {
+                                log($"Найден: Папка {Path.GetFileName(sub)} ({sub})");
+                                banReasons.Add($"Найдена папка чита - {Path.GetFileName(sub)} ({sub})");
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            var pulseKeywords = new[]
+            {
+                "pulse visual", "pulsevisual", "pulse_visual", "pulse-visual",
+                "pulse visuals", "pulsevisuals", "pulse-visuals", "pulse_visuals"
+            };
+
+            var nonGameApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "chrome", "msedge", "firefox", "opera", "yandex", "brave", "vivaldi", "browser",
+                "discord", "telegram", "explorer", "devenv", "msbuild", "code", "rider", "idea64"
+            };
+
+            try
+            {
+                foreach (var proc in Process.GetProcesses())
+                {
+                    try
+                    {
+                        string pName = proc.ProcessName.ToLower();
+                        if (pName == "angelminechecker") continue;
+
+                        string title = "";
+                        try { title = proc.MainWindowTitle?.ToLower() ?? ""; } catch { }
+
+                        string desc = "";
+                        try { desc = proc.MainModule?.FileVersionInfo?.FileDescription?.ToLower() ?? ""; } catch { }
+
+                        string prod = "";
+                        try { prod = proc.MainModule?.FileVersionInfo?.ProductName?.ToLower() ?? ""; } catch { }
+
+                        bool isNonGame = nonGameApps.Any(app => pName.Contains(app));
+
+                        bool matched = false;
+                        foreach (var kw in pulseKeywords)
+                        {
+                            if (pName.Contains(kw) ||
+                                (!isNonGame && title.Contains(kw)) ||
+                                desc.Contains(kw) ||
+                                prod.Contains(kw))
+                            {
+                                string detail = !string.IsNullOrEmpty(proc.MainWindowTitle) ? $" [{proc.MainWindowTitle}]" : "";
+                                string key = $"proc_{proc.Id}_{proc.ProcessName}";
+                                if (seen.Add(key))
+                                {
+                                    log($"Найден активный процесс Pulse Visual: {proc.ProcessName}.exe (PID: {proc.Id}){detail}");
+                                    banReasons.Add($"Активный процесс: {proc.ProcessName}.exe (PID: {proc.Id}){detail}");
+                                }
+                                matched = true;
+                                break;
+                            }
+                        }
+
+                        if (!matched && pName == "pulse")
+                        {
+                            if (!desc.Contains("secure") && !prod.Contains("secure") &&
+                                (title.Contains("visual") || desc.Contains("visual") || prod.Contains("visual") || title.Contains("pulse") || string.IsNullOrEmpty(title)))
+                            {
+                                string detail = !string.IsNullOrEmpty(proc.MainWindowTitle) ? $" [{proc.MainWindowTitle}]" : "";
+                                string key = $"proc_{proc.Id}_{proc.ProcessName}";
+                                if (seen.Add(key))
+                                {
+                                    log($"Найден активный процесс Pulse Visual: {proc.ProcessName}.exe (PID: {proc.Id}){detail}");
+                                    banReasons.Add($"Активный процесс: {proc.ProcessName}.exe (PID: {proc.Id}){detail}");
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            try
+            {
+                int currentPid = Process.GetCurrentProcess().Id;
+                using (var searcher = new ManagementObjectSearcher("SELECT ProcessId, Name, CommandLine FROM Win32_Process"))
+                using (var objects = searcher.Get())
+                {
+                    foreach (ManagementObject obj in objects)
+                    {
+                        try
+                        {
+                            string pName = (obj["Name"] as string ?? "").ToLower();
+                            string cmd = obj["CommandLine"] as string ?? "";
+                            int pid = Convert.ToInt32(obj["ProcessId"]);
+                            if (string.IsNullOrEmpty(cmd) || pid == currentPid) continue;
+
+                            string cmdLower = cmd.ToLower();
+                            if (cmdLower.Contains("angelminechecker") || nonGameApps.Any(app => pName.Contains(app))) continue;
+
+                            foreach (var kw in pulseKeywords)
+                            {
+                                if (cmdLower.Contains(kw))
+                                {
+                                    string key = $"wmi_proc_{pid}";
+                                    if (seen.Add(key))
+                                    {
+                                        log($"Найден процесс Pulse Visual: {pName} (PID: {pid})");
+                                        banReasons.Add($"Активный процесс Pulse Visual - {pName} (PID: {pid})");
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                string prefetchDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Prefetch");
+                if (Directory.Exists(prefetchDir))
+                {
+                    foreach (var pf in Directory.GetFiles(prefetchDir, "*.pf"))
+                    {
+                        string pfName = Path.GetFileName(pf).ToLower();
+                        if (pfName.Contains("pulsevisual") || pfName.Contains("pulse_visual") ||
+                            pfName.Contains("pulse-visual") || (pfName.Contains("pulse") && pfName.Contains("visual")))
+                        {
+                            var fi = new FileInfo(pf);
+                            if (seen.Add(fi.Name))
+                            {
+                                log($"Найден запуск в Prefetch: {fi.Name} (время: {fi.LastWriteTime:dd.MM.yyyy HH:mm:ss})");
+                                banReasons.Add($"Найден запуск чита в Prefetch - {fi.Name}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
         }
 
     }
