@@ -71,26 +71,74 @@ namespace AngelMineChecker
             }
         }
 
-        private static readonly MemorySignature[] JvmMemorySignatures = new[]
+        public static readonly string[] DoomsdayStrings = new[]
         {
-            new MemorySignature("com/doomsday/tweaker", "class"),
-            new MemorySignature("com/doomsday", "class"),
-            new MemorySignature("host: doomsdayclient.xyz", "network"),
-            new MemorySignature("host: doomsdayclient.com", "network"),
-            new MemorySignature("https://doomsdayclient.xyz", "network"),
-            new MemorySignature("http://doomsdayclient.xyz", "network"),
-            new MemorySignature("doomsdayclient.xyz", "network"),
-            new MemorySignature("doomsdayclient.com", "network"),
-            new MemorySignature("doomsday loaded successfully", "cheat"),
-            new MemorySignature("starting inject shellcode", "cheat"),
-            new MemorySignature("injected! loading...", "cheat"),
-            new MemorySignature("--doomsdayargs", "cheat"),
-            new MemorySignature("--doomsdayversion", "cheat"),
-            new MemorySignature("--clickguikey", "cheat"),
-            new MemorySignature("failed to inject jvmti agent", "cheat"),
-            new MemorySignature("z4mfltptb", "cheat"),
-            new MemorySignature("arial_3_128_2.png", "font")
+            "qngOR4LLGyKpHanrK8257iBxbxMLILqj",
+            "pOWYffAhUci9yTiGHi1bSrpFaRLbK6ZDT4vIk7vHrvEsDBcD6QT7POsEbLU9p0Ht",
+            "3cZ8yz8CJ9uuhbLGNoP8WK",
+            "65kB6yOHkqyIVHie0aJz",
+            "77X7GjcoO4ls1YMc7VN7Fh1AWV7exvj",
+            "Be83IIp7HqD0FnuT6cMRXWq3ITh",
+            "BwXrWWLndVgXP3nCjl2T7",
+            "E1aTaHoeCvF0jiUMjljhOySuCDeDNiofTP0",
+            "KCfcPreShXlnj2mM7opNnNXU1",
+            "M0aJQ9EgVBLjLlADgBC5JfMjvLS8CNvgZB",
+            "N09dquWSSCG9ynxpcMggwnJ",
+            "N1Yer2oZeGUJqxIm04nrCNmwq",
+            "PqbsqY27KTVTy1Xqb5Qu9FC0",
+            "YMJ5m3rttKKSpwwLcVNd",
+            "YWCmzr2hnYumBIQi6Z6tiB",
+            "aBhR9NFYh42RCOhGjEshc3vy8ySusnMCg",
+            "cGJHcgcMLH16Zu5IMk7UYIewjrKj01poctpG",
+            "dmFcvYcNaY3KuzlCh2DK0BIAWIjN8",
+            "gg2v3Oa3pmFXxSSWbvF0",
+            "ggQK7smmxq7LeCmYbDKROn6S4XHo",
+            "i7S0WoWzDer3BYyRXFGq8",
+            "lIjhTaufwBC3j8y4YP0ih5nyp",
+            "nlGrUNIITzTtE5hCWN31Ft1MUuFoFnJC4QjaeEAM",
+            "plwGne3k2xIRR9ylbugeaJRSsTRa7ZKdOgV",
+            "qyTc3jia9nMEVCjA6BHsYId",
+            "s5h9gkjvwLCo2xSO0XE8Y9jz5CZa",
+            "sMxo38AGCNB483R4CPUZmxYJ17hwqUyBu",
+            "sv6yaeCLf6G7VKHbnEBUVCrU",
+            "uaVGhewx0602RnDcS9esl2PStmbAVr",
+            "vgLxlB1s5LnZi9QdMdFIPtn6TD5AH4a8w7z11Or",
+            "y3426mpn375PMaoxUvKH",
+            "yBFeXFluO2kzpPtm6ANtUX"
         };
+
+        private static readonly MemorySignature[] JvmMemorySignatures = BuildMemorySignatures();
+
+        private static MemorySignature[] BuildMemorySignatures()
+        {
+            var list = new List<MemorySignature>
+            {
+                new MemorySignature("com/doomsday/tweaker", "class"),
+                new MemorySignature("com/doomsday", "class"),
+                new MemorySignature("host: doomsdayclient.xyz", "network"),
+                new MemorySignature("host: doomsdayclient.com", "network"),
+                new MemorySignature("https://doomsdayclient.xyz", "network"),
+                new MemorySignature("http://doomsdayclient.xyz", "network"),
+                new MemorySignature("doomsdayclient.xyz", "network"),
+                new MemorySignature("doomsdayclient.com", "network"),
+                new MemorySignature("doomsday loaded successfully", "cheat"),
+                new MemorySignature("starting inject shellcode", "cheat"),
+                new MemorySignature("injected! loading...", "cheat"),
+                new MemorySignature("--doomsdayargs", "cheat"),
+                new MemorySignature("--doomsdayversion", "cheat"),
+                new MemorySignature("--clickguikey", "cheat"),
+                new MemorySignature("failed to inject jvmti agent", "cheat"),
+                new MemorySignature("z4mfltptb", "cheat"),
+                new MemorySignature("arial_3_128_2.png", "font")
+            };
+
+            foreach (var str in DoomsdayStrings)
+            {
+                list.Add(new MemorySignature(str, "string"));
+            }
+
+            return list.ToArray();
+        }
 
         private static readonly byte[][] MemoryAnchors = new[]
         {
@@ -98,7 +146,39 @@ namespace AngelMineChecker
             Encoding.ASCII.GetBytes("z4mfltptb"),
             Encoding.ASCII.GetBytes("shellcode"),
             Encoding.ASCII.GetBytes("--clickgui"),
-            Encoding.ASCII.GetBytes("arial_3_128_2")
+            Encoding.ASCII.GetBytes("arial_3_128_2"),
+            Encoding.ASCII.GetBytes("qngOR4LL"),
+            Encoding.ASCII.GetBytes("pOWYffAh"),
+            Encoding.ASCII.GetBytes("3cZ8yz8CJ"),
+            Encoding.ASCII.GetBytes("65kB6yOH"),
+            Encoding.ASCII.GetBytes("77X7Gjco"),
+            Encoding.ASCII.GetBytes("Be83IIp7"),
+            Encoding.ASCII.GetBytes("BwXrWWLn"),
+            Encoding.ASCII.GetBytes("E1aTaHoe"),
+            Encoding.ASCII.GetBytes("KCfcPreS"),
+            Encoding.ASCII.GetBytes("M0aJQ9Eg"),
+            Encoding.ASCII.GetBytes("N09dquWS"),
+            Encoding.ASCII.GetBytes("N1Yer2oZ"),
+            Encoding.ASCII.GetBytes("PqbsqY27"),
+            Encoding.ASCII.GetBytes("YMJ5m3rt"),
+            Encoding.ASCII.GetBytes("YWCmzr2h"),
+            Encoding.ASCII.GetBytes("aBhR9NFY"),
+            Encoding.ASCII.GetBytes("cGJHcgcM"),
+            Encoding.ASCII.GetBytes("dmFcvYcN"),
+            Encoding.ASCII.GetBytes("gg2v3Oa3"),
+            Encoding.ASCII.GetBytes("ggQK7smm"),
+            Encoding.ASCII.GetBytes("i7S0WoWz"),
+            Encoding.ASCII.GetBytes("lIjhTauf"),
+            Encoding.ASCII.GetBytes("nlGrUNII"),
+            Encoding.ASCII.GetBytes("plwGne3k"),
+            Encoding.ASCII.GetBytes("qyTc3jia"),
+            Encoding.ASCII.GetBytes("s5h9gkjv"),
+            Encoding.ASCII.GetBytes("sMxo38AG"),
+            Encoding.ASCII.GetBytes("sv6yaeCL"),
+            Encoding.ASCII.GetBytes("uaVGhewx"),
+            Encoding.ASCII.GetBytes("vgLxlB1s"),
+            Encoding.ASCII.GetBytes("y3426mpn"),
+            Encoding.ASCII.GetBytes("yBFeXFlu")
         };
 
         public static bool CheckFile(FileInfo file, out string reason)
@@ -1105,6 +1185,8 @@ namespace AngelMineChecker
                                                             desc = $"Сетевое обращение Java к серверу Doomsday ({sig.Pattern} в PID {pid})";
                                                         else if (sig.Category == "class")
                                                             desc = $"Класс чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
+                                                        else if (sig.Category == "string")
+                                                            desc = $"Строка чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
                                                         else
                                                             desc = $"След чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
 

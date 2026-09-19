@@ -105,8 +105,9 @@ namespace AngelMineChecker
                 "librarian_trade_finder", "librariantradefinder", "sacurachorusfind", "chorusfind")
         };
 
-        public static async Task RunAsync(Action<string> log)
+        public static async Task<List<string>> RunAsync(Action<string> log, ScanOptions options = null)
         {
+            if (options == null) options = new ScanOptions();
             var banReasons = new List<string>();
 
             lock (DetectedCheatFolders)
@@ -154,7 +155,25 @@ namespace AngelMineChecker
             CheckSuspiciousProcesses(log, banReasons);
             CheckPulseVisual(log, banReasons);
 
-            await CheckDoomsday.RunDoomsdayCheckAsync(log, banReasons);
+            if (options.CheckSystemDlc)
+            {
+                CheckSystemDLC.Scan(log, banReasons);
+            }
+
+            if (options.CheckCortex)
+            {
+                CheckCortex.Scan(log, banReasons);
+            }
+
+            if (options.CheckLuminar)
+            {
+                CheckLuminar.Scan(log, banReasons);
+            }
+
+            if (options.CheckDoomsday)
+            {
+                await CheckDoomsday.RunDoomsdayCheckAsync(log, banReasons);
+            }
 
             log("");
             log("");
@@ -173,6 +192,8 @@ namespace AngelMineChecker
             {
                 log("Нарушений не обнаружено.");
             }
+
+            return banReasons;
         }
 
         internal static (List<string> modsDirs, List<string> logsDirs) DiscoverLauncherDirectories()
@@ -1761,25 +1782,6 @@ namespace AngelMineChecker
                         {
                             log($"Prefetch: последнее изменение {latestPf:dd.MM.yyyy HH:mm} (> 30 мин. назад).");
                         }
-                    }
-                }
-            }
-            catch { }
-
-            try
-            {
-                string tempPath = Path.GetTempPath();
-                if (Directory.Exists(tempPath))
-                {
-                    DateTime tempTime = Directory.GetLastWriteTime(tempPath);
-                    TimeSpan tempAge = DateTime.Now - tempTime;
-                    if (tempAge.TotalMinutes <= 30 && tempAge.TotalMinutes >= 0)
-                    {
-                        log($"Temp: недавнее изменение (< 30 мин. назад, {tempTime:dd.MM.yyyy HH:mm}, {(int)tempAge.TotalMinutes} мин. назад).");
-                    }
-                    else
-                    {
-                        log($"Temp: последнее изменение {tempTime:dd.MM.yyyy HH:mm} (> 30 мин. назад).");
                     }
                 }
             }

@@ -107,8 +107,9 @@ namespace AngelMineChecker
             "attach.dll", "instrument.dll", "prefs.dll", "w2k_lsa_auth.dll", "sspi_bridge.dll"
         };
 
-        public static async Task RunAsync(int? targetPid, Action<string> log)
+        public static async Task<List<string>> RunAsync(int? targetPid, Action<string> log, ScanOptions options = null)
         {
+            if (options == null) options = new ScanOptions();
             var banReasons = new List<string>();
 
             log("Запуск проверки");
@@ -167,11 +168,15 @@ namespace AngelMineChecker
             CheckRegistryDeep(log, banReasons);
             await Task.Delay(150);
 
-            log("Поиск следов SystemDLC");
-            await Task.Delay(250);
-            CheckSystemDlc(log, banReasons);
-            CheckConsoleHostHistory(log, banReasons);
-            await Task.Delay(150);
+            if (options.CheckSystemDlc)
+            {
+                log("Поиск следов SystemDLC");
+                await Task.Delay(250);
+                CheckSystemDlc(log, banReasons);
+                CheckSystemDLC.Scan(log, banReasons);
+                CheckConsoleHostHistory(log, banReasons);
+                await Task.Delay(150);
+            }
 
             int resolvedPid = ResolveTargetPid(targetPid, log);
             if (resolvedPid > 0)
@@ -191,7 +196,22 @@ namespace AngelMineChecker
                 log("Процесс javaw.exe не запущен (пропуск анализа памяти и DLL инжектов)");
             }
 
-            await CheckDoomsday.RunDoomsdayCheckAsync(log, banReasons, resolvedPid > 0 ? (int?)resolvedPid : targetPid);
+            if (options.CheckCortex)
+            {
+                log("Поиск следов Cortex");
+                CheckCortex.Scan(log, banReasons, resolvedPid > 0 ? (int?)resolvedPid : targetPid);
+            }
+
+            if (options.CheckLuminar)
+            {
+                log("Поиск следов Luminar");
+                CheckLuminar.Scan(log, banReasons, resolvedPid > 0 ? (int?)resolvedPid : targetPid);
+            }
+
+            if (options.CheckDoomsday)
+            {
+                await CheckDoomsday.RunDoomsdayCheckAsync(log, banReasons, resolvedPid > 0 ? (int?)resolvedPid : targetPid);
+            }
 
             log("");
             log("");
@@ -224,6 +244,8 @@ namespace AngelMineChecker
             {
                 log("Не обнаружено.");
             }
+
+            return banReasons;
         }
 
         private static void CheckServices(Action<string> log, List<string> banReasons)

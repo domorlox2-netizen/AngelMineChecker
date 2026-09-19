@@ -528,6 +528,17 @@ namespace AngelMineChecker
             }
         }
 
+        private ScanOptions GetScanOptions()
+        {
+            return new ScanOptions
+            {
+                CheckCortex = chkCortex?.IsChecked == true,
+                CheckSystemDlc = chkSystemDlc?.IsChecked == true,
+                CheckDoomsday = chkDoomsday?.IsChecked == true,
+                CheckLuminar = chkLuminar?.IsChecked == true
+            };
+        }
+
         private void RefreshProcesses()
         {
             if (comboProcesses == null) return;
@@ -536,7 +547,30 @@ namespace AngelMineChecker
 
             try
             {
-                var targetProcesses = Process.GetProcesses()
+                var cmdLines = new Dictionary<int, string>();
+                try
+                {
+                    using (var searcher = new System.Management.ManagementObjectSearcher("SELECT ProcessId, CommandLine FROM Win32_Process"))
+                    using (var objs = searcher.Get())
+                    {
+                        foreach (System.Management.ManagementObject obj in objs)
+                        {
+                            try
+                            {
+                                int pid = Convert.ToInt32(obj["ProcessId"]);
+                                string cmd = obj["CommandLine"] as string ?? "";
+                                if (!string.IsNullOrEmpty(cmd))
+                                {
+                                    cmdLines[pid] = cmd;
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                catch { }
+
+                var candidateProcesses = Process.GetProcesses()
                     .Where(p =>
                     {
                         try
@@ -546,14 +580,51 @@ namespace AngelMineChecker
                         }
                         catch { return false; }
                     })
-                    .OrderBy(p => p.ProcessName)
+                    .Select(p =>
+                    {
+                        string title = "";
+                        try { title = p.MainWindowTitle ?? ""; } catch { }
+                        cmdLines.TryGetValue(p.Id, out string cmd);
+                        cmd = cmd ?? "";
+
+                        string titleLower = title.ToLower();
+                        string cmdLower = cmd.ToLower();
+
+                        bool isGame = titleLower.Contains("minecraft") ||
+                                      Regex.IsMatch(title, @"\b1\.\d{1,2}") ||
+                                      cmdLower.Contains("--gamedir") ||
+                                      cmdLower.Contains("net.minecraft") ||
+                                      cmdLower.Contains("knotclient");
+
+                        bool isLauncher = !isGame && (
+                            titleLower.Contains("tlauncher") ||
+                            titleLower.Contains("legacy") ||
+                            titleLower.Contains("launcher") ||
+                            cmdLower.Contains("tlauncher") ||
+                            cmdLower.Contains("launcher.jar") ||
+                            cmdLower.Contains("bootstrap") ||
+                            p.ProcessName.ToLower().Contains("launcher")
+                        );
+
+                        int priority = isGame ? 100 : (isLauncher ? 10 : 50);
+
+                        string tag = "";
+                        if (isGame) tag = " — Minecraft [Игра]";
+                        else if (isLauncher) tag = " — Лаунчер";
+
+                        string display = $"{p.ProcessName}.exe (PID: {p.Id}){tag}";
+
+                        return new { Process = p, Priority = priority, Display = display };
+                    })
+                    .OrderByDescending(x => x.Priority)
+                    .ThenByDescending(x => x.Process.Id)
                     .ToList();
 
-                if (targetProcesses.Count > 0)
+                if (candidateProcesses.Count > 0)
                 {
-                    foreach (var p in targetProcesses)
+                    foreach (var item in candidateProcesses)
                     {
-                        comboProcesses.Items.Add($"{p.ProcessName}.exe (PID: {p.Id})");
+                        comboProcesses.Items.Add(item.Display);
                     }
                     comboProcesses.SelectedIndex = 0;
                 }
@@ -602,15 +673,45 @@ namespace AngelMineChecker
             if (_isScanning) return;
             _isScanning = true;
 
+            var options = GetScanOptions();
+            var sessionLogs = new List<string>();
+            var startTime = DateTime.Now;
+            List<string> banReasons = new List<string>();
+
+            int? targetPid = null;
+            if (txtProcessId != null && int.TryParse(txtProcessId.Text.Trim(), out int parsedPid) && parsedPid > 0)
+            {
+                targetPid = parsedPid;
+            }
+            string targetProcName = comboProcesses?.SelectedItem?.ToString();
+
             try
             {
                 await Task.Run(async () =>
                 {
-                    await QuickScanner.RunAsync(msg =>
+                    banReasons = await QuickScanner.RunAsync(msg =>
                     {
+                        lock (sessionLogs)
+                        {
+                            sessionLogs.Add(string.IsNullOrEmpty(msg) ? "" : $"[{DateTime.Now:HH:mm:ss}] {msg}");
+                        }
                         Dispatcher.BeginInvoke((Action)(() => AppendLog(msg)));
-                    });
+                    }, options);
                 });
+
+                var report = new ReportModel
+                {
+                    ScanType = "Быстрая проверка",
+                    StartTime = startTime,
+                    EndTime = DateTime.Now,
+                    TargetPid = targetPid,
+                    TargetProcessName = targetProcName,
+                    Options = options,
+                    BanReasons = banReasons,
+                    Logs = sessionLogs,
+                    Accounts = AccountScanner.FindAllAccounts()
+                };
+                HtmlReportGenerator.GenerateAndOpen(report);
             }
             catch (Exception ex)
             {
@@ -640,21 +741,45 @@ namespace AngelMineChecker
 
             _isScanning = true;
 
+            var options = GetScanOptions();
+            var sessionLogs = new List<string>();
+            var startTime = DateTime.Now;
+            List<string> banReasons = new List<string>();
+
+            int? targetPid = null;
+            if (txtProcessId != null && int.TryParse(txtProcessId.Text.Trim(), out int parsedPid) && parsedPid > 0)
+            {
+                targetPid = parsedPid;
+            }
+            string targetProcName = comboProcesses?.SelectedItem?.ToString();
+
             try
             {
-                int? targetPid = null;
-                if (txtProcessId != null && int.TryParse(txtProcessId.Text.Trim(), out int parsedPid) && parsedPid > 0)
-                {
-                    targetPid = parsedPid;
-                }
-
                 await Task.Run(async () =>
                 {
-                    await DeepScanner.RunAsync(targetPid, msg =>
+                    banReasons = await DeepScanner.RunAsync(targetPid, msg =>
                     {
+                        lock (sessionLogs)
+                        {
+                            sessionLogs.Add(string.IsNullOrEmpty(msg) ? "" : $"[{DateTime.Now:HH:mm:ss}] {msg}");
+                        }
                         Dispatcher.BeginInvoke((Action)(() => AppendLog(msg)));
-                    });
+                    }, options);
                 });
+
+                var report = new ReportModel
+                {
+                    ScanType = "Тонкая проверка",
+                    StartTime = startTime,
+                    EndTime = DateTime.Now,
+                    TargetPid = targetPid,
+                    TargetProcessName = targetProcName,
+                    Options = options,
+                    BanReasons = banReasons,
+                    Logs = sessionLogs,
+                    Accounts = AccountScanner.FindAllAccounts()
+                };
+                HtmlReportGenerator.GenerateAndOpen(report);
             }
             catch (Exception ex)
             {
