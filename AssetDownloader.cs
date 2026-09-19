@@ -19,17 +19,14 @@ namespace AngelMineChecker
             {
                 string baseDir = AppDomain.CurrentDomain.BaseDirectory;
                 string toolsDir = Path.Combine(baseDir, "tools");
-                string iconsDir = Path.Combine(baseDir, "icons");
-                if (!Directory.Exists(toolsDir) || !Directory.Exists(iconsDir)) return false;
+                if (!Directory.Exists(toolsDir)) return false;
 
                 string jt = Path.Combine(toolsDir, "JournalTrace.exe");
                 string ev = Path.Combine(toolsDir, "everything.exe");
                 string ev2 = Path.Combine(toolsDir, "Everything.exe");
                 string ep = Path.Combine(toolsDir, "ExecutedProgramsList.exe");
                 
-                bool hasTool = File.Exists(jt) || File.Exists(ev) || File.Exists(ev2) || File.Exists(ep);
-                bool hasIcon = Directory.GetFiles(iconsDir, "*.png").Length > 0;
-                return hasTool && hasIcon;
+                return File.Exists(jt) || File.Exists(ev) || File.Exists(ev2) || File.Exists(ep);
             }
             catch
             {

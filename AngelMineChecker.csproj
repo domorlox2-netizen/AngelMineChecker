@@ -54,8 +54,25 @@
     <Reference Include="System.Net.Http" />
   </ItemGroup>
   <ItemGroup>
-    <Resource Include="icons\*.png" />
     <Resource Include="Resources\splash_avatar.png" />
+    <Resource Include="icons\BrowserDownloadsView.png" />
+    <Resource Include="icons\BrowsingHistoryView.png" />
+    <Resource Include="icons\datausage.png" />
+    <Resource Include="icons\Everything.png" />
+    <Resource Include="icons\ExecutedProgramsList.png" />
+    <Resource Include="icons\explorer.png" />
+    <Resource Include="icons\folder.png" />
+    <Resource Include="icons\JournalTrace.png" />
+    <Resource Include="icons\JumpListsView.png" />
+    <Resource Include="icons\nvidia.png" />
+    <Resource Include="icons\ProcessHacker.png" />
+    <Resource Include="icons\services.png" />
+    <Resource Include="icons\ShellBagAnalyzer.png" />
+    <Resource Include="icons\ShellBagsView_extracted.png" />
+    <Resource Include="icons\SystemInformer.png" />
+    <Resource Include="icons\USBDeview.png" />
+    <Resource Include="icons\UserAssistView.png" />
+    <Resource Include="icons\WinPrefetchView.png" />
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml">
