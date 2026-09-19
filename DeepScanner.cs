@@ -775,11 +775,20 @@ namespace AngelMineChecker
                 if (File.Exists(histPath))
                 {
                     var lines = File.ReadAllLines(histPath);
-                    var suspiciousCmds = new[] { "psexec", "jlivef", "systemdlc", "clear-eventlog", "wevtutil", "fsutil" };
+                    var suspiciousCmds = new[] { "psexec", "jlivef", "systemdlc", "clear-eventlog", "wevtutil cl", "wevtutil clear-log", "fsutil usn deletejournal" };
                     foreach (var line in lines)
                     {
                         string trimmed = line.Trim();
                         string lower = trimmed.ToLower();
+                        if (string.IsNullOrWhiteSpace(trimmed)) continue;
+
+                        if (lower.Contains("angelminechecker") || lower.Contains("where-object") ||
+                            lower.Contains("select-object") || lower.Contains("format-table") ||
+                            lower.Contains("findstr") || lower.Contains("select-string") ||
+                            lower.Contains("get-help"))
+                        {
+                            continue;
+                        }
 
                         bool found = false;
                         foreach (var sc in suspiciousCmds)

@@ -54,8 +54,7 @@ namespace AngelMineChecker
             "doomsday loaded successfully",
             "starting inject shellcode",
             "injected! loading...",
-            "failed to inject jvmti agent",
-            "doomsdayclient.xyz"
+            "failed to inject jvmti agent"
         };
 
         private class MemorySignature
@@ -345,7 +344,11 @@ namespace AngelMineChecker
 
                             if (cmdLower.Contains("google.com") || cmdLower.Contains("youtube.com") || cmdLower.Contains("yandex.") ||
                                 cmdLower.Contains("/search?") || cmdLower.Contains("q=") || cmdLower.Contains("bing.com") ||
-                                cmdLower.Contains("duckduckgo.com"))
+                                cmdLower.Contains("duckduckgo.com") || cmdLower.Contains("where-object") ||
+                                cmdLower.Contains("get-dnsclientcache") || cmdLower.Contains("resolve-dnsname") ||
+                                cmdLower.Contains("get-nettcpconnection") || cmdLower.Contains("findstr") ||
+                                cmdLower.Contains("select-string") || cmdLower.Contains("get-winevent") ||
+                                cmdLower.Contains("format-table"))
                             {
                                 continue;
                             }
@@ -407,17 +410,40 @@ namespace AngelMineChecker
                     {
                         string trimmed = line.Trim();
                         string lower = trimmed.ToLower();
+                        if (string.IsNullOrWhiteSpace(trimmed)) continue;
+
                         if (lower.Contains("angelminechecker") || lower.Contains("checkdoomsday") ||
                             lower.Contains("select-string") || lower.Contains("findstr") || lower.Contains("grep") ||
-                            lower.Contains("get-help") || lower.Contains("search")) continue;
+                            lower.Contains("get-help") || lower.Contains("search") || lower.Contains("where-object") ||
+                            lower.Contains("select-object") || lower.Contains("format-table") || lower.Contains("out-string") ||
+                            lower.Contains("get-dnsclientcache") || lower.Contains("resolve-dnsname") ||
+                            lower.Contains("get-nettcpconnection") || lower.Contains("test-netconnection") ||
+                            lower.Contains("get-winevent") || lower.Contains("get-process") || lower.Contains("get-item") ||
+                            lower.Contains("get-childitem") || lower.Contains("get-content") || lower.Contains("get-filehash") ||
+                            lower.Contains("gci ") || lower.Contains("dir ") || lower.Contains("ls ") ||
+                            lower.Contains("ping ") || lower.Contains("nslookup") || lower.Contains("ipconfig") ||
+                            lower.Contains("curl ") || lower.Contains("echo ") || lower.Contains("write-host") ||
+                            lower.Contains("write-output"))
+                        {
+                            continue;
+                        }
 
                         string cleanLine = trimmed.Replace("\r", " ").Replace("\n", " ").Trim();
                         if (cleanLine.Length > 110) cleanLine = cleanLine.Substring(0, 107) + "...";
 
-                        if (lower.Contains("doomsday") || lower.Contains("doomday") || lower.Contains("shellcode") ||
-                            (lower.Contains("java") && lower.Contains("-jar") && lower.Contains(".dll")))
+                        bool isCheatLaunch = false;
+                        if (lower.Contains("doomsday.exe") || lower.Contains("doomday.exe") ||
+                            lower.Contains("start doomsday") || lower.Contains("start doomday") ||
+                            (lower.Contains("--doomsday") || lower.Contains("com.doomsday")) ||
+                            (lower.Contains("inject") && (lower.Contains("doomsday") || lower.Contains("doomday") || lower.Contains("shellcode"))) ||
+                            (lower.Contains("java") && lower.Contains("-jar") && (lower.Contains("doomsday") || lower.Contains("doomday"))))
                         {
-                            log?.Invoke($"Найден след Doomsday в истории PowerShell: {cleanLine}");
+                            isCheatLaunch = true;
+                        }
+
+                        if (isCheatLaunch)
+                        {
+                            log?.Invoke($"Найден след запуска Doomsday в истории PowerShell: {cleanLine}");
                             banReasons.Add($"След запуска Doomsday в истории PowerShell - {cleanLine}");
                             found++;
                         }
@@ -594,34 +620,6 @@ namespace AngelMineChecker
                         found++;
                     }
                 }
-
-                if (found == 0)
-                {
-                    try
-                    {
-                        var psPsi = new ProcessStartInfo
-                        {
-                            FileName = "powershell",
-                            Arguments = "-NoProfile -Command \"Get-DnsClientCache | Where-Object { $_.Entry -like '*doomsdayclient*' } | Select-Object -ExpandProperty Entry\"",
-                            UseShellExecute = false,
-                            RedirectStandardOutput = true,
-                            CreateNoWindow = true
-                        };
-                        using (var psProc = Process.Start(psPsi))
-                        {
-                            string psOut = psProc.StandardOutput.ReadToEnd();
-                            psProc.WaitForExit(3000);
-                            if (psOut.IndexOf("doomsdayclient.xyz", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                psOut.IndexOf("doomsdayclient.com", StringComparison.OrdinalIgnoreCase) >= 0)
-                            {
-                                log?.Invoke("Обнаружена запись Doomsday в кэше DNS клиента Windows");
-                                banReasons.Add("След Doomsday в DNS-кэше Windows");
-                                found++;
-                            }
-                        }
-                    }
-                    catch { }
-                }
             }
             catch { }
 
@@ -663,8 +661,7 @@ namespace AngelMineChecker
 
                         if (jnaModules.Count == 0) continue;
 
-                        var moduleDescs = new List<string>();
-                        bool hasSuspiciousJna = false;
+                        var suspiciousModules = new List<string>();
 
                         for (int i = 0; i < jnaModules.Count; i++)
                         {
@@ -675,81 +672,45 @@ namespace AngelMineChecker
                             try { modName = mod.ModuleName ?? "jna_module"; } catch { }
                             try { filePath = mod.FileName ?? ""; } catch { }
 
-                            string modInfo;
                             if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
                             {
                                 try
                                 {
                                     var fi = new FileInfo(filePath);
-                                    var vi = mod.FileVersionInfo;
-
-                                    string desc = (vi?.FileDescription ?? "").Trim();
-                                    string ver = (vi?.FileVersion ?? "").Trim();
-                                    string prod = (vi?.ProductName ?? "").Trim();
-
-                                    bool emptyMeta = string.IsNullOrEmpty(desc) && string.IsNullOrEmpty(ver) && string.IsNullOrEmpty(prod);
-                                    bool hasCompanionX = File.Exists(filePath + ".x");
-
-                                    string sha256 = "";
-                                    if (fi.Length > 0 && fi.Length < 20 * 1024 * 1024)
+                                    if (fi.Length > 0 && fi.Length < 25 * 1024 * 1024)
                                     {
-                                        using (var sha = SHA256.Create())
-                                        using (var fs = fi.OpenRead())
+                                        byte[] fileBytes = File.ReadAllBytes(filePath);
+                                        string content = Encoding.ASCII.GetString(fileBytes).ToLowerInvariant();
+
+                                        bool hasDoomsdaySig = content.Contains("doomsdayclient") ||
+                                                              content.Contains("doomsday") ||
+                                                              content.Contains("doomday") ||
+                                                              content.Contains("z4mfltptb") ||
+                                                              content.Contains("inject shellcode") ||
+                                                              content.Contains("com/doomsday") ||
+                                                              content.Contains("--doomsday");
+
+                                        if (hasDoomsdaySig)
                                         {
-                                            byte[] hashBytes = sha.ComputeHash(fs);
-                                            sha256 = BitConverter.ToString(hashBytes).Replace("-", "").ToUpperInvariant();
+                                            string sizeStr = $"{fi.Length / 1024} КБ";
+                                            string timeStr = fi.CreationTime.ToString("dd.MM.yyyy HH:mm:ss");
+                                            suspiciousModules.Add($"{modName} [{filePath}] ({sizeStr}, {timeStr}, сигнатура Doomsday в коде)");
                                         }
                                     }
-
-                                    string flagReason = "";
-                                    if (sha256 == "AD683F7AE2C912EF502FD802F256094FCEAA238260115CAAEFB1913A13ABD5E2")
-                                    {
-                                        hasSuspiciousJna = true;
-                                        flagReason = "сигнатура Doomsday SHA256";
-                                    }
-                                    else if (emptyMeta && hasCompanionX)
-                                    {
-                                        hasSuspiciousJna = true;
-                                        flagReason = "Doomsday companion .x";
-                                    }
-                                    else if (emptyMeta && fi.Length >= 300000 && fi.Length <= 450000)
-                                    {
-                                        hasSuspiciousJna = true;
-                                        flagReason = "аномальный размер и пустые метаданные";
-                                    }
-
-                                    string sizeStr = $"{fi.Length / 1024} КБ";
-                                    string timeStr = fi.CreationTime.ToString("dd.MM.yyyy HH:mm:ss");
-                                    string note = !string.IsNullOrEmpty(flagReason) ? $", {flagReason}" : "";
-
-                                    modInfo = $"{modName} [{filePath}] ({sizeStr}, {timeStr}{note})";
                                 }
-                                catch
-                                {
-                                    modInfo = $"{modName} [{filePath}]";
-                                }
+                                catch { }
                             }
-                            else
-                            {
-                                modInfo = string.IsNullOrEmpty(filePath) ? modName : $"{modName} [{filePath}]";
-                            }
-
-                            moduleDescs.Add(modInfo);
                         }
 
-                        if (hasSuspiciousJna || jnaModules.Count > 1)
+                        if (suspiciousModules.Count > 0)
                         {
-                            log?.Invoke($"Обнаружен инжект Doomsday через JNA native в процессе PID {pid} ({jnaModules.Count} JNA модулей):");
-                            foreach (var md in moduleDescs)
+                            log?.Invoke($"Обнаружен инжект Doomsday через нативный модуль в процессе PID {pid}:");
+                            foreach (var md in suspiciousModules)
                             {
                                 log?.Invoke($"  -> {md}");
+                                banReasons.Add($"Инжект Doomsday в процесс PID {pid} ({md})");
                             }
-
-                            for (int i = 0; i < moduleDescs.Count; i++)
-                            {
-                                banReasons.Add($"Инжект Doomsday в процесс PID {pid} (модуль #{i + 1}: {moduleDescs[i]})");
-                            }
-                            found++;
+                            found += suspiciousModules.Count;
                         }
                     }
                     catch { }
@@ -810,19 +771,14 @@ namespace AngelMineChecker
 
                             if (int.TryParse(pidStr, out int pid) && targetPids.Contains(pid))
                             {
-                                if (state.Equals("LISTENING", StringComparison.OrdinalIgnoreCase) && (localAddr.StartsWith("127.0.0.1:") || localAddr.StartsWith("[::1]:")))
-                                {
-                                    string port = localAddr.Substring(localAddr.LastIndexOf(':') + 1);
-                                    log?.Invoke($"Обнаружен активный порт IPC Doomsday в процессе PID {pid}: {localAddr}");
-                                    banReasons.Add($"Скрытый локальный порт Doomsday (127.0.0.1:{port} в PID {pid})");
-                                    found++;
-                                }
-
                                 if (remoteAddr.StartsWith("172.67.138.") || remoteAddr.StartsWith("104.21.48.") || remoteAddr.StartsWith("165.22.196."))
                                 {
-                                    log?.Invoke($"Обнаружено сетевое подключение Java к серверу Doomsday (PID {pid} -> {remoteAddr}, {state})");
-                                    banReasons.Add($"Сетевое подключение Java к серверу Doomsday ({remoteAddr} в PID {pid}, {state})");
-                                    found++;
+                                    if (state.Equals("ESTABLISHED", StringComparison.OrdinalIgnoreCase) || state.Equals("SYN_SENT", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        log?.Invoke($"Обнаружено сетевое подключение Java к серверу Doomsday (PID {pid} -> {remoteAddr}, {state})");
+                                        banReasons.Add($"Сетевое подключение Java к серверу Doomsday ({remoteAddr} в PID {pid}, {state})");
+                                        found++;
+                                    }
                                 }
                             }
                         }
@@ -1058,7 +1014,9 @@ namespace AngelMineChecker
                         inSummary = true;
                     }
 
-                    if (!bodyDetailsInserted && !inSummary && line.Contains("Инжект думика обнаружен"))
+                    bool matchesHeading = line.Contains("Инжект думика обнаружен") || line.Contains("Следы Doomsday обнаружены");
+
+                    if (!bodyDetailsInserted && !inSummary && matchesHeading)
                     {
                         sb.AppendLine(line);
                         bodyDetailsInserted = true;
@@ -1069,7 +1027,7 @@ namespace AngelMineChecker
                         continue;
                     }
 
-                    if (inSummary && line.Contains("Инжект думика обнаружен"))
+                    if (inSummary && matchesHeading)
                     {
                         sb.AppendLine(line + ":");
                         foreach (var det in details)
@@ -1090,29 +1048,32 @@ namespace AngelMineChecker
         {
             log?.Invoke("Проверка doomsday");
 
-            int totalFound = 0;
+            int activeInjectionFound = 0;
+            int tracesFound = 0;
             var internalReasons = new List<string>();
 
             await Task.Run(() =>
             {
-                totalFound += CheckActiveProcesses(null, internalReasons);
-                totalFound += CheckJnaModules(targetPid, null, internalReasons);
-                totalFound += CheckLoopbackPorts(targetPid, null, internalReasons);
-                totalFound += CheckConhostMemory(null, internalReasons);
-                totalFound += CheckJvmAttach(null, internalReasons);
-                totalFound += CheckJvmMemory(targetPid, null, internalReasons);
-                totalFound += CheckFileSystemTraces(null, internalReasons);
+                activeInjectionFound += CheckActiveProcesses(null, internalReasons);
+                activeInjectionFound += CheckJnaModules(targetPid, null, internalReasons);
+                activeInjectionFound += CheckLoopbackPorts(targetPid, null, internalReasons);
+                activeInjectionFound += CheckJvmAttach(null, internalReasons);
+                activeInjectionFound += CheckJvmMemory(targetPid, null, internalReasons);
+
+                tracesFound += CheckConhostMemory(null, internalReasons);
+                tracesFound += CheckFileSystemTraces(null, internalReasons);
 
                 var dnsReasons = new List<string>();
                 int dnsFound = CheckDnsCache(null, dnsReasons);
-                if (internalReasons.Count > 0 && dnsFound > 0)
+                if ((activeInjectionFound > 0 || tracesFound > 0) && dnsFound > 0)
                 {
                     internalReasons.AddRange(dnsReasons);
-                    totalFound += dnsFound;
+                    tracesFound += dnsFound;
                 }
             });
 
-            if (totalFound > 0 || internalReasons.Count > 0)
+            int totalFound = activeInjectionFound + tracesFound;
+            if (activeInjectionFound > 0)
             {
                 lock (_findingsLock)
                 {
@@ -1121,6 +1082,17 @@ namespace AngelMineChecker
                 }
                 log?.Invoke("Инжект думика обнаружен");
                 banReasons.Add("Инжект думика обнаружен");
+                return Math.Max(totalFound, internalReasons.Count);
+            }
+            else if (tracesFound > 0 || internalReasons.Count > 0)
+            {
+                lock (_findingsLock)
+                {
+                    _lastDetailedFindings.Clear();
+                    _lastDetailedFindings.AddRange(internalReasons.Distinct());
+                }
+                log?.Invoke("Следы Doomsday обнаружены");
+                banReasons.Add("Следы Doomsday обнаружены");
                 return Math.Max(totalFound, internalReasons.Count);
             }
             else
