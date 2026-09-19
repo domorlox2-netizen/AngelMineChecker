@@ -981,63 +981,11 @@ namespace AngelMineChecker
             return false;
         }
 
-        public static readonly string[] SystemDlcSignatures = new[]
-        {
-            DecodeSig("NjdjZnVlZ3UwcDhybQ=="),
-            DecodeSig("QVJST1dfUklHSFRaT05UQUw="),
-            DecodeSig("RFJPUERPV05fU1VDQ0VTUw=="),
-            DecodeSig("dG9vbHRpcF9hcnJvd191cA=="),
-            DecodeSig("TjFZMEc2emZ6MEVTSm9DSQ=="),
-            DecodeSig("YXJTQnFCUWZiVW5GUFRHZQ=="),
-            DecodeSig("dX1weG10aG9iaV1kWF5SWExSRkxARjo/MzgsMSYq")
-        };
+        public static string[] SystemDlcSignatures => CheckSystemDLC.Signatures;
 
         public static bool CheckSystemDlcInFile(FileInfo file, out string foundSig)
         {
-            foundSig = "";
-            if (file == null || !file.Exists) return false;
-            if (IsCheckerOrSelf(file.FullName)) return false;
-
-            string nameLower = file.Name.ToLower();
-            string ext = file.Extension.ToLower();
-            if (nameLower.StartsWith("+~jf") || ext == ".ttf" || ext == ".otf" || ext == ".woff" || ext == ".woff2")
-                return false;
-
-            try
-            {
-                long len = file.Length;
-                if (len == 0 || len > 35 * 1024 * 1024) return false;
-
-                using (var fs = file.OpenRead())
-                {
-                    byte[] buf = new byte[Math.Min((int)len, 4 * 1024 * 1024)];
-                    int read = fs.Read(buf, 0, buf.Length);
-                    if (read >= 4)
-                    {
-                        if ((buf[0] == 0 && buf[1] == 1 && buf[2] == 0 && buf[3] == 0) ||
-                            (buf[0] == 'O' && buf[1] == 'T' && buf[2] == 'T' && buf[3] == 'O') ||
-                            (buf[0] == 'w' && buf[1] == 'O' && buf[2] == 'F' && buf[3] == 'F'))
-                            return false;
-                    }
-
-                    string ascii = Encoding.ASCII.GetString(buf, 0, read);
-                    string utf8 = Encoding.UTF8.GetString(buf, 0, read);
-                    string unicode = Encoding.Unicode.GetString(buf, 0, read - (read % 2));
-
-                    foreach (var sig in SystemDlcSignatures)
-                    {
-                        if (ascii.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            utf8.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            unicode.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            foundSig = sig;
-                            return true;
-                        }
-                    }
-                }
-            }
-            catch { }
-            return false;
+            return CheckSystemDLC.CheckInFile(file, out foundSig);
         }
 
         internal static async Task<(int threats, int warnings)> ScanModsFoldersAsync(List<string> modsDirs, Action<string> log, List<string> banReasons)
