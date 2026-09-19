@@ -61,12 +61,18 @@ namespace AngelMineChecker
         {
             public string Pattern { get; }
             public string Category { get; }
+            public byte[] AsciiBytes { get; }
+            public byte[] UnicodeBytes { get; }
             public byte[] LowerAscii { get; }
+            public bool IsCaseSensitive { get; }
 
-            public MemorySignature(string pattern, string category)
+            public MemorySignature(string pattern, string category, bool caseSensitive = true)
             {
                 Pattern = pattern;
                 Category = category;
+                IsCaseSensitive = caseSensitive;
+                AsciiBytes = Encoding.ASCII.GetBytes(pattern);
+                UnicodeBytes = Encoding.Unicode.GetBytes(pattern);
                 LowerAscii = Encoding.ASCII.GetBytes(pattern.ToLowerInvariant());
             }
         }
@@ -113,73 +119,32 @@ namespace AngelMineChecker
         {
             var list = new List<MemorySignature>
             {
-                new MemorySignature("com/doomsday/tweaker", "class"),
-                new MemorySignature("com/doomsday", "class"),
-                new MemorySignature("host: doomsdayclient.xyz", "network"),
-                new MemorySignature("host: doomsdayclient.com", "network"),
-                new MemorySignature("https://doomsdayclient.xyz", "network"),
-                new MemorySignature("http://doomsdayclient.xyz", "network"),
-                new MemorySignature("doomsdayclient.xyz", "network"),
-                new MemorySignature("doomsdayclient.com", "network"),
-                new MemorySignature("doomsday loaded successfully", "cheat"),
-                new MemorySignature("starting inject shellcode", "cheat"),
-                new MemorySignature("injected! loading...", "cheat"),
-                new MemorySignature("--doomsdayargs", "cheat"),
-                new MemorySignature("--doomsdayversion", "cheat"),
-                new MemorySignature("--clickguikey", "cheat"),
-                new MemorySignature("failed to inject jvmti agent", "cheat"),
-                new MemorySignature("z4mfltptb", "cheat"),
-                new MemorySignature("arial_3_128_2.png", "font")
+                new MemorySignature("com/doomsday/tweaker", "class", false),
+                new MemorySignature("com/doomsday", "class", false),
+                new MemorySignature("host: doomsdayclient.xyz", "network", false),
+                new MemorySignature("host: doomsdayclient.com", "network", false),
+                new MemorySignature("https://doomsdayclient.xyz", "network", false),
+                new MemorySignature("http://doomsdayclient.xyz", "network", false),
+                new MemorySignature("doomsdayclient.xyz", "network", false),
+                new MemorySignature("doomsdayclient.com", "network", false),
+                new MemorySignature("doomsday loaded successfully", "cheat", false),
+                new MemorySignature("starting inject shellcode", "cheat", false),
+                new MemorySignature("injected! loading...", "cheat", false),
+                new MemorySignature("--doomsdayargs", "cheat", false),
+                new MemorySignature("--doomsdayversion", "cheat", false),
+                new MemorySignature("--clickguikey", "cheat", false),
+                new MemorySignature("failed to inject jvmti agent", "cheat", false),
+                new MemorySignature("z4mfltptb", "cheat", false),
+                new MemorySignature("arial_3_128_2.png", "font", false)
             };
 
             foreach (var str in DoomsdayStrings)
             {
-                list.Add(new MemorySignature(str, "string"));
+                list.Add(new MemorySignature(str, "string", true));
             }
 
             return list.ToArray();
         }
-
-        private static readonly byte[][] MemoryAnchors = new[]
-        {
-            Encoding.ASCII.GetBytes("doomsday"),
-            Encoding.ASCII.GetBytes("z4mfltptb"),
-            Encoding.ASCII.GetBytes("shellcode"),
-            Encoding.ASCII.GetBytes("--clickgui"),
-            Encoding.ASCII.GetBytes("arial_3_128_2"),
-            Encoding.ASCII.GetBytes("qngOR4LL"),
-            Encoding.ASCII.GetBytes("pOWYffAh"),
-            Encoding.ASCII.GetBytes("3cZ8yz8CJ"),
-            Encoding.ASCII.GetBytes("65kB6yOH"),
-            Encoding.ASCII.GetBytes("77X7Gjco"),
-            Encoding.ASCII.GetBytes("Be83IIp7"),
-            Encoding.ASCII.GetBytes("BwXrWWLn"),
-            Encoding.ASCII.GetBytes("E1aTaHoe"),
-            Encoding.ASCII.GetBytes("KCfcPreS"),
-            Encoding.ASCII.GetBytes("M0aJQ9Eg"),
-            Encoding.ASCII.GetBytes("N09dquWS"),
-            Encoding.ASCII.GetBytes("N1Yer2oZ"),
-            Encoding.ASCII.GetBytes("PqbsqY27"),
-            Encoding.ASCII.GetBytes("YMJ5m3rt"),
-            Encoding.ASCII.GetBytes("YWCmzr2h"),
-            Encoding.ASCII.GetBytes("aBhR9NFY"),
-            Encoding.ASCII.GetBytes("cGJHcgcM"),
-            Encoding.ASCII.GetBytes("dmFcvYcN"),
-            Encoding.ASCII.GetBytes("gg2v3Oa3"),
-            Encoding.ASCII.GetBytes("ggQK7smm"),
-            Encoding.ASCII.GetBytes("i7S0WoWz"),
-            Encoding.ASCII.GetBytes("lIjhTauf"),
-            Encoding.ASCII.GetBytes("nlGrUNII"),
-            Encoding.ASCII.GetBytes("plwGne3k"),
-            Encoding.ASCII.GetBytes("qyTc3jia"),
-            Encoding.ASCII.GetBytes("s5h9gkjv"),
-            Encoding.ASCII.GetBytes("sMxo38AG"),
-            Encoding.ASCII.GetBytes("sv6yaeCL"),
-            Encoding.ASCII.GetBytes("uaVGhewx"),
-            Encoding.ASCII.GetBytes("vgLxlB1s"),
-            Encoding.ASCII.GetBytes("y3426mpn"),
-            Encoding.ASCII.GetBytes("yBFeXFlu")
-        };
 
         public static bool CheckFile(FileInfo file, out string reason)
         {
@@ -576,7 +541,8 @@ namespace AngelMineChecker
             try
             {
                 var conhosts = Process.GetProcessesByName("conhost");
-                var lowerPatterns = DoomsdayConhostSignatures.Select(s => Encoding.ASCII.GetBytes(s.ToLower())).ToList();
+                var asciiPatterns = DoomsdayConhostSignatures.Select(s => Encoding.ASCII.GetBytes(s)).ToList();
+                var uniPatterns = DoomsdayConhostSignatures.Select(s => Encoding.Unicode.GetBytes(s)).ToList();
 
                 foreach (var proc in conhosts)
                 {
@@ -624,14 +590,13 @@ namespace AngelMineChecker
                                         int readLen = readCount.ToInt32();
                                         if (readLen > 0)
                                         {
-                                            for (int i = 0; i < lowerPatterns.Count; i++)
+                                            for (int i = 0; i < asciiPatterns.Count; i++)
                                             {
                                                 string patName = DoomsdayConhostSignatures[i];
                                                 if (detectedInProc.Contains(patName)) continue;
 
-                                                byte[] patBytes = lowerPatterns[i];
-                                                if (ContainsAsciiCaseInsensitive(buffer, readLen, patBytes) ||
-                                                    ContainsUnicodeCaseInsensitive(buffer, readLen, patBytes))
+                                                if (ContainsSequence(buffer, readLen, asciiPatterns[i]) ||
+                                                    ContainsSequence(buffer, readLen, uniPatterns[i]))
                                                 {
                                                     detectedInProc.Add(patName);
                                                     log?.Invoke($"Найден след Doomsday в буфере консоли (conhost.exe PID {proc.Id}): \"{patName}\"");
@@ -1098,7 +1063,13 @@ namespace AngelMineChecker
                     targetPids.Add(preferredPid.Value);
                 }
 
-                foreach (var p in Process.GetProcessesByName("javaw").Concat(Process.GetProcessesByName("java")))
+                var allProcs = Process.GetProcessesByName("javaw").Concat(Process.GetProcessesByName("java"))
+                    .OrderByDescending(p =>
+                    {
+                        try { return p.WorkingSet64; } catch { return 0L; }
+                    });
+
+                foreach (var p in allProcs)
                 {
                     if (!targetPids.Contains(p.Id))
                         targetPids.Add(p.Id);
@@ -1122,7 +1093,7 @@ namespace AngelMineChecker
 
                         while (currentAddress < maxAddress)
                         {
-                            if (detectedInPid.Count >= 5 || sw.ElapsedMilliseconds > 6000) break;
+                            if (detectedInPid.Count >= 10 || sw.ElapsedMilliseconds > 25000) break;
 
                             MEMORY_BASIC_INFORMATION mbi;
                             int res = VirtualQueryEx(hProcess, new IntPtr(currentAddress), out mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION)));
@@ -1139,12 +1110,12 @@ namespace AngelMineChecker
                                  (mbi.Protect & PAGE_EXECUTE_READ) != 0 ||
                                  (mbi.Protect & PAGE_EXECUTE_READWRITE) != 0))
                             {
-                                long bytesToRead = Math.Min(regionBytes, 67108864);
+                                long bytesToRead = Math.Min(regionBytes, 33554432);
                                 long offset = 0;
 
                                 while (offset < bytesToRead)
                                 {
-                                    if (detectedInPid.Count >= 5 || sw.ElapsedMilliseconds > 6000) break;
+                                    if (detectedInPid.Count >= 10 || sw.ElapsedMilliseconds > 25000) break;
 
                                     int chunk = (int)Math.Min((long)buffer.Length, bytesToRead - offset);
                                     IntPtr readAddr = new IntPtr(mbi.BaseAddress.ToInt64() + offset);
@@ -1154,47 +1125,35 @@ namespace AngelMineChecker
                                         int readLen = readCount.ToInt32();
                                         if (readLen > 0)
                                         {
-                                            bool hasAnyAnchor = false;
-                                            for (int a = 0; a < MemoryAnchors.Length; a++)
+                                            for (int i = 0; i < JvmMemorySignatures.Length; i++)
                                             {
-                                                if (ContainsAsciiCaseInsensitive(buffer, readLen, MemoryAnchors[a]) ||
-                                                    ContainsUnicodeCaseInsensitive(buffer, readLen, MemoryAnchors[a]))
+                                                var sig = JvmMemorySignatures[i];
+                                                if (detectedInPid.Contains(sig.Pattern)) continue;
+
+                                                bool matched = ContainsSequence(buffer, readLen, sig.AsciiBytes) ||
+                                                               ContainsSequence(buffer, readLen, sig.UnicodeBytes);
+
+                                                if (matched)
                                                 {
-                                                    hasAnyAnchor = true;
-                                                    break;
-                                                }
-                                            }
+                                                    detectedInPid.Add(sig.Pattern);
+                                                    string desc;
+                                                    if (sig.Category == "classloader")
+                                                        desc = $"Внедрённый ClassLoader Doomsday в Java ({sig.Pattern} в PID {pid})";
+                                                    else if (sig.Category == "font")
+                                                        desc = $"Сетевая загрузка шрифтов Doomsday в Java ({sig.Pattern} в PID {pid})";
+                                                    else if (sig.Category == "network")
+                                                        desc = $"Сетевое обращение Java к серверу Doomsday ({sig.Pattern} в PID {pid})";
+                                                    else if (sig.Category == "class")
+                                                        desc = $"Класс чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
+                                                    else if (sig.Category == "string")
+                                                        desc = $"Строка чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
+                                                    else
+                                                        desc = $"След чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
 
-                                            if (hasAnyAnchor)
-                                            {
-                                                for (int i = 0; i < JvmMemorySignatures.Length; i++)
-                                                {
-                                                    var sig = JvmMemorySignatures[i];
-                                                    if (detectedInPid.Contains(sig.Pattern)) continue;
-
-                                                    if (ContainsAsciiCaseInsensitive(buffer, readLen, sig.LowerAscii) ||
-                                                        ContainsUnicodeCaseInsensitive(buffer, readLen, sig.LowerAscii))
-                                                    {
-                                                        detectedInPid.Add(sig.Pattern);
-                                                        string desc;
-                                                        if (sig.Category == "classloader")
-                                                            desc = $"Внедрённый ClassLoader Doomsday в Java ({sig.Pattern} в PID {pid})";
-                                                        else if (sig.Category == "font")
-                                                            desc = $"Сетевая загрузка шрифтов Doomsday в Java ({sig.Pattern} в PID {pid})";
-                                                        else if (sig.Category == "network")
-                                                            desc = $"Сетевое обращение Java к серверу Doomsday ({sig.Pattern} в PID {pid})";
-                                                        else if (sig.Category == "class")
-                                                            desc = $"Класс чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
-                                                        else if (sig.Category == "string")
-                                                            desc = $"Строка чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
-                                                        else
-                                                            desc = $"След чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
-
-                                                        log?.Invoke(desc);
-                                                        banReasons.Add(desc);
-                                                        found++;
-                                                        if (detectedInPid.Count >= 5) break;
-                                                    }
+                                                    log?.Invoke(desc);
+                                                    banReasons.Add(desc);
+                                                    found++;
+                                                    if (detectedInPid.Count >= 10) break;
                                                 }
                                             }
                                         }
@@ -1204,7 +1163,9 @@ namespace AngelMineChecker
                                 }
                             }
 
-                            currentAddress = mbi.BaseAddress.ToInt64() + regionBytes;
+                            long nextAddr = mbi.BaseAddress.ToInt64() + regionBytes;
+                            if (nextAddr <= currentAddress) break;
+                            currentAddress = nextAddr;
                         }
                     }
                     catch { }
@@ -1212,6 +1173,8 @@ namespace AngelMineChecker
                     {
                         if (hProcess != IntPtr.Zero) CloseHandle(hProcess);
                     }
+
+                    if (found > 0) break;
                 }
             }
             catch { }
@@ -1576,67 +1539,31 @@ namespace AngelMineChecker
             }
         }
 
-        private static bool ContainsAsciiCaseInsensitive(byte[] buffer, int length, byte[] lowerPattern)
+        private static bool ContainsSequence(byte[] buffer, int length, byte[] pattern)
         {
-            if (lowerPattern == null || lowerPattern.Length == 0 || length < lowerPattern.Length) return false;
-            byte first = lowerPattern[0];
-            int max = length - lowerPattern.Length;
-            for (int i = 0; i <= max; i++)
-            {
-                byte b = buffer[i];
-                if (b >= 65 && b <= 90) b = (byte)(b + 32);
-                if (b == first)
-                {
-                    bool match = true;
-                    for (int j = 1; j < lowerPattern.Length; j++)
-                    {
-                        byte bj = buffer[i + j];
-                        if (bj >= 65 && bj <= 90) bj = (byte)(bj + 32);
-                        if (bj != lowerPattern[j])
-                        {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) return true;
-                }
-            }
-            return false;
-        }
+            if (pattern == null || pattern.Length == 0 || length < pattern.Length) return false;
+            byte first = pattern[0];
+            int patLen = pattern.Length;
+            int maxStart = length - patLen;
+            int start = 0;
 
-        private static bool ContainsUnicodeCaseInsensitive(byte[] buffer, int length, byte[] lowerPattern)
-        {
-            if (lowerPattern == null || lowerPattern.Length == 0) return false;
-            int patLen = lowerPattern.Length;
-            int unicodeBytesLen = patLen * 2;
-            if (length < unicodeBytesLen) return false;
-
-            byte first = lowerPattern[0];
-            int max = length - unicodeBytesLen;
-            for (int i = 0; i <= max; i++)
+            while (start <= maxStart)
             {
-                if (i + 1 < length && buffer[i + 1] == 0)
+                int idx = Array.IndexOf(buffer, first, start, length - start);
+                if (idx < 0 || idx > maxStart) return false;
+
+                bool match = true;
+                for (int j = 1; j < patLen; j++)
                 {
-                    byte b = buffer[i];
-                    if (b >= 65 && b <= 90) b = (byte)(b + 32);
-                    if (b == first)
+                    if (buffer[idx + j] != pattern[j])
                     {
-                        bool match = true;
-                        for (int j = 1; j < patLen; j++)
-                        {
-                            int idx = i + j * 2;
-                            if (idx + 1 >= length || buffer[idx + 1] != 0) { match = false; break; }
-                            byte bj = buffer[idx];
-                            if (bj >= 65 && bj <= 90) bj = (byte)(bj + 32);
-                            if (bj != lowerPattern[j])
-                            {
-                                match = false;
-                                break;
-                            }
-                        }
-                        if (match) return true;
+                        match = false;
+                        break;
                     }
                 }
+                if (match) return true;
+
+                start = idx + 1;
             }
             return false;
         }

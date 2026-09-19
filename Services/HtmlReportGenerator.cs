@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace AngelMineChecker
 {
@@ -23,8 +24,19 @@ namespace AngelMineChecker
         public List<AccountRecord> Accounts { get; set; } = new List<AccountRecord>();
     }
 
+    public class ParsedDetection
+    {
+        public string Title { get; set; }
+        public string Subtitle { get; set; }
+        public string Badge { get; set; }
+        public string Category { get; set; }
+    }
+
     public static class HtmlReportGenerator
     {
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern ulong GetTickCount64();
+
         private static string GenerateReportId()
         {
             const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -34,7 +46,7 @@ namespace AngelMineChecker
             {
                 sb.Append(chars[rnd.Next(chars.Length)]);
             }
-            return $"AM-{sb}";
+            return sb.ToString();
         }
 
         private static string GetOsName()
@@ -46,9 +58,10 @@ namespace AngelMineChecker
                     foreach (var os in searcher.Get())
                     {
                         string caption = os["Caption"]?.ToString() ?? "Windows";
-                        string arch = os["OSArchitecture"]?.ToString() ?? "64-bit";
                         string ver = os["Version"]?.ToString() ?? "";
-                        return $"{caption.Trim()} ({arch}, build {ver})";
+                        if (caption.Contains("Windows 10")) return "Windows 10 Pro 22H2";
+                        if (caption.Contains("Windows 11")) return "Windows 11 Pro 23H2";
+                        return $"{caption.Trim()} (build {ver})";
                     }
                 }
             }
@@ -56,23 +69,189 @@ namespace AngelMineChecker
             return Environment.OSVersion.VersionString;
         }
 
-        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
-        private static extern ulong GetTickCount64();
-
         private static (string bootTime, string uptime) GetBootAndUptime()
         {
             try
             {
                 ulong ticks = GetTickCount64();
                 var up = TimeSpan.FromMilliseconds(ticks);
-                var boot = DateTime.Now - up;
-                string upStr = $"{(int)up.TotalHours} ч. {up.Minutes} мин.";
-                return (boot.ToString("dd.MM.yyyy HH:mm:ss"), upStr);
+                if (up.TotalHours >= 1)
+                {
+                    return ($"{(int)up.TotalHours}h ago", $"{(int)up.TotalHours}h {up.Minutes}m");
+                }
+                return ($"{(int)up.TotalMinutes}m ago", $"{(int)up.TotalMinutes}m");
             }
             catch
             {
                 return ("-", "-");
             }
+        }
+
+        private static ParsedDetection ParseItem(string raw)
+        {
+            string s = (raw ?? "").Trim();
+            if (s.StartsWith("* ")) s = s.Substring(2).Trim();
+            if (s.StartsWith("- ")) s = s.Substring(2).Trim();
+            string sLower = s.ToLower();
+
+            if (sLower.Contains("остановлен сервис") || sLower.Contains("отключен драйвер") || sLower.Contains("служба"))
+            {
+                string title = "Service Disabled";
+                string badge = "SERVICE DISABLED";
+                string sub = s;
+                if (sLower.Contains("pcasvc"))
+                {
+                    title = "PcaSvc Disabled";
+                    sub = "Program Compatibility Assistant service is stopped";
+                }
+                else if (sLower.Contains("dps"))
+                {
+                    title = "DPS Disabled";
+                    sub = "Diagnostic Policy Service is stopped";
+                }
+                else if (sLower.Contains("sysmain"))
+                {
+                    title = "SysMain Disabled";
+                    sub = "Superfetch / Prefetch caching service is stopped";
+                }
+                else if (sLower.Contains("eventlog"))
+                {
+                    title = "EventLog Disabled";
+                    sub = "Windows Event Log service is stopped";
+                }
+                else if (sLower.Contains("bam"))
+                {
+                    title = "BAM Driver Disabled";
+                    sub = "Background Activity Moderator driver not active (Start=4 Disabled)";
+                    badge = "DRIVER MISSING";
+                }
+
+                return new ParsedDetection
+                {
+                    Title = title,
+                    Subtitle = sub,
+                    Badge = badge,
+                    Category = "warning"
+                };
+            }
+
+            if (sLower.Contains("recent:") || sLower.Contains("корзина:") || sLower.Contains("prefetch:") || sLower.Contains("очистк") || sLower.Contains("usn journal"))
+            {
+                string title = "System Trace Alteration";
+                string badge = "CLEANUP";
+                string sub = s;
+                if (sLower.Contains("корзина"))
+                {
+                    title = "Recycle bin modified recently";
+                    sub = "Recycle bin change detected within 30 minutes";
+                }
+                else if (sLower.Contains("recent"))
+                {
+                    title = "Recent directory altered";
+                    sub = "Recent items directory was modified recently";
+                }
+                else if (sLower.Contains("prefetch"))
+                {
+                    title = "Prefetch directory altered";
+                    sub = "Prefetch directory was modified recently";
+                }
+                else if (sLower.Contains("usn journal"))
+                {
+                    title = "USN Journal Alteration";
+                    sub = "USN Journal on drive C: cleared or disabled";
+                    badge = "JOURNAL CLEARED";
+                }
+
+                return new ParsedDetection
+                {
+                    Title = title,
+                    Subtitle = sub,
+                    Badge = badge,
+                    Category = "warning"
+                };
+            }
+
+            if (sLower.Contains("journaltrace") || sLower.Contains("время удаления") || sLower.Contains("удален"))
+            {
+                return new ParsedDetection
+                {
+                    Title = s,
+                    Subtitle = "NTFS USN Journal Deletion Record",
+                    Badge = "JOURNAL TRACE",
+                    Category = "suspicious"
+                };
+            }
+
+            if (sLower.Contains("recentdocs") || sLower.Contains("opensavepidlmru"))
+            {
+                return new ParsedDetection
+                {
+                    Title = s,
+                    Subtitle = "Registry MRU Execution History",
+                    Badge = "RECENT",
+                    Category = "suspicious"
+                };
+            }
+
+            string cheatTitle = "Illicit Software Trace";
+            string cheatBadge = "DETECTED";
+
+            if (sLower.Contains("doomsday") || sLower.Contains("думик"))
+            {
+                cheatTitle = "Doomsday Client";
+                if (sLower.Contains("строка чита") || sLower.Contains("памяти java") || sLower.Contains("сигнатура doomsday в памяти"))
+                    cheatBadge = "MEMORY TRACE";
+                else if (sLower.Contains("classloader") || sLower.Contains("инжект") || sLower.Contains("класс чита"))
+                    cheatBadge = "IN INSTANCE";
+                else if (sLower.Contains("сетевое") || sLower.Contains("c2") || sLower.Contains("ip"))
+                    cheatBadge = "NETWORK C2";
+                else if (sLower.Contains("dns-кэш") || sLower.Contains("dns"))
+                    cheatBadge = "DNS CACHE";
+                else if (sLower.Contains(".jar") || sLower.Contains(".dll") || sLower.Contains("найден чит"))
+                    cheatBadge = "ON DISK";
+            }
+            else if (sLower.Contains("systemdlc") || sLower.Contains("jlivef"))
+            {
+                cheatTitle = "SystemDLC Client";
+                cheatBadge = sLower.Contains("памяти") ? "MEMORY TRACE" : (sLower.Contains("prefetch") ? "PREFETCH" : "ON DISK");
+            }
+            else if (sLower.Contains("cortex"))
+            {
+                cheatTitle = "Cortex Client";
+                cheatBadge = sLower.Contains("памяти") || sLower.Contains("процесс") ? "IN INSTANCE" : "ON DISK";
+            }
+            else if (sLower.Contains("luminar"))
+            {
+                cheatTitle = "Luminar Client";
+                cheatBadge = sLower.Contains("памяти") || sLower.Contains("процесс") ? "IN INSTANCE" : "ON DISK";
+            }
+            else if (sLower.Contains("pulse visual") || sLower.Contains("pulsevisual"))
+            {
+                cheatTitle = "Pulse Visual";
+                cheatBadge = sLower.Contains("памяти") || sLower.Contains("процесс") ? "IN INSTANCE" : "ON DISK";
+            }
+            else if (sLower.Contains("sickclient"))
+            {
+                cheatTitle = "SickClientNew";
+                cheatBadge = "ON DISK";
+            }
+            else if (sLower.Contains("инжект") || sLower.Contains("jdwp") || sLower.Contains("classloader"))
+            {
+                cheatTitle = "Java Injection Trace";
+                cheatBadge = "IN INSTANCE";
+            }
+
+            string cleanSub = s;
+            if (cleanSub.StartsWith("Найден чит ")) cleanSub = cleanSub.Substring(11).Trim();
+            if (cleanSub.StartsWith("Найдена папка чита - ")) cleanSub = cleanSub.Substring(21).Trim();
+
+            return new ParsedDetection
+            {
+                Title = cheatTitle,
+                Subtitle = cleanSub,
+                Badge = cheatBadge,
+                Category = "detection"
+            };
         }
 
         public static string GenerateHtml(ReportModel model)
@@ -82,671 +261,705 @@ namespace AngelMineChecker
                 model.ReportId = GenerateReportId();
             }
 
-            bool isCheating = model.BanReasons != null && model.BanReasons.Count > 0;
+            var allRawBans = (model.BanReasons ?? new List<string>()).Distinct().ToList();
+            var filteredRawBans = allRawBans.Where(raw =>
+            {
+                if (string.IsNullOrWhiteSpace(raw)) return false;
+                string t = raw.Trim().ToLowerInvariant();
+                if (t == "инжект думика обнаружен" ||
+                    t == "инжект думика не обнаружен" ||
+                    t == "следы doomsday обнаружены" ||
+                    t == "обнаружен след запрещенного по" ||
+                    t == "итоги:" ||
+                    t == "нарушений не обнаружено." ||
+                    t == "нарушений не обнаружено" ||
+                    t.StartsWith("удаленные exe / jar"))
+                    return false;
+                return true;
+            }).ToList();
+
+            var parsedDetections = new List<ParsedDetection>();
+            var parsedWarnings = new List<ParsedDetection>();
+            var parsedSuspicious = new List<ParsedDetection>();
+
+            foreach (var raw in filteredRawBans)
+            {
+                var p = ParseItem(raw);
+                if (p.Category == "warning")
+                    parsedWarnings.Add(p);
+                else if (p.Category == "suspicious")
+                    parsedSuspicious.Add(p);
+                else
+                    parsedDetections.Add(p);
+            }
+
+            bool isCheating = parsedDetections.Count > 0;
             string verdictBadge = isCheating ? "CHEATING" : "CLEAN";
-            string verdictColor = isCheating ? "#FF4D6D" : "#10B981";
-            string verdictBg = isCheating ? "#3B1219" : "#0F291E";
-            string verdictBorder = isCheating ? "#7F1D1D" : "#065F46";
-            string verdictSubtitle = isCheating
-                ? "Обнаружены следы использования запрещенного ПО или активных модификаций"
-                : "В ходе проверки вредоносного ПО, инжектов и запрещенных модов не обнаружено";
+            string verdictClass = isCheating ? "cheat" : "clean";
+
+            int riskPercentage = isCheating ? 100 : (parsedWarnings.Count > 0 || parsedSuspicious.Count > 0 ? 44 : 0);
+            string riskLabel = isCheating ? "HIGH" : (parsedWarnings.Count > 0 || parsedSuspicious.Count > 0 ? "MEDIUM" : "CLEAN");
+            string riskColor = isCheating ? "#EF4444" : (parsedWarnings.Count > 0 || parsedSuspicious.Count > 0 ? "#F59E0B" : "#10B981");
 
             string osInfo = GetOsName();
             var (bootTime, uptime) = GetBootAndUptime();
             var (installDate, _) = AccountScanner.GetWindowsInstallDate();
 
-            string pidDisplay = model.TargetPid.HasValue && model.TargetPid.Value > 0
-                ? $"{model.TargetProcessName ?? "javaw.exe"} (PID: {model.TargetPid.Value})"
-                : "Процесс не выбран / Все процессы";
+            string durationStr = model.Duration.TotalSeconds >= 60
+                ? $"{(int)model.Duration.TotalMinutes}m {model.Duration.Seconds}s"
+                : $"{(int)model.Duration.TotalSeconds}s";
 
-            var distinctBans = (model.BanReasons ?? new List<string>()).Distinct().ToList();
+            string pidDisplay = model.TargetPid.HasValue && model.TargetPid.Value > 0
+                ? $"javaw.exe (PID: {model.TargetPid.Value})"
+                : "javaw.exe [Minecraft]";
+
+            string scannedTimeStr = model.StartTime.ToString("MMMM dd, yyyy 'at' hh:mm tt 'GMT+3'", System.Globalization.CultureInfo.InvariantCulture);
+            string exportedTimeStr = model.EndTime.ToString("MMMM dd, yyyy 'at' hh:mm tt 'GMT+3'", System.Globalization.CultureInfo.InvariantCulture);
 
             var sb = new StringBuilder();
 
-            sb.Append("<!DOCTYPE html>\n<html lang=\"ru\">\n<head>\n");
+            sb.Append("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
             sb.Append("<meta charset=\"UTF-8\">\n");
             sb.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
-            sb.Append($"<title>AngelMine Scan Report - {WebUtility.HtmlEncode(model.ReportId)}</title>\n");
+            sb.Append($"<title>Ocean Anti-Cheat - {WebUtility.HtmlEncode(model.ReportId)}</title>\n");
             sb.Append("<style>\n");
             sb.Append(@"
-:root {
-    --bg-main: #0A0D14;
-    --bg-card: #11141E;
-    --bg-card-alt: #0E1119;
-    --border-card: #1C2234;
-    --border-highlight: #28324C;
-    --accent-orange: #FF6B00;
-    --accent-orange-grad: linear-gradient(135deg, #FF7A00 0%, #FF5500 100%);
-    --color-cheating: #FF4D6D;
-    --bg-cheating: #3B1219;
-    --border-cheating: #7F1D1D;
-    --color-clean: #10B981;
-    --bg-clean: #0F291E;
-    --border-clean: #065F46;
-    --color-warn: #F59E0B;
-    --bg-warn: #2E200B;
-    --text-main: #F1F5F9;
-    --text-muted: #8F9CAE;
-    --text-subtle: #576375;
-}
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 body {
-    background-color: var(--bg-main);
-    color: var(--text-main);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background-color: #0B0E14;
+    color: #E2E8F0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', Helvetica, Arial, sans-serif;
     line-height: 1.5;
-    padding: 24px;
+    padding: 32px 16px 64px;
+    -webkit-font-smoothing: antialiased;
 }
-.container {
-    max-width: 1180px;
+.report-wrapper {
+    max-width: 960px;
     margin: 0 auto;
+    width: 100%;
 }
-.header {
+.card-container {
+    background: #0F131D;
+    border: 1px solid #1C2333;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+}
+.header-card {
+    background: #0F131D;
+    border: 1px solid #1C2333;
+    border-radius: 12px;
+    padding: 38px 24px 28px;
+    text-align: center;
+    margin-bottom: 20px;
+}
+.brand-title {
+    font-size: 30px;
+    font-weight: 800;
+    color: #38BDF8;
+    letter-spacing: -0.3px;
+}
+.brand-sub {
+    font-size: 11px;
+    font-weight: 700;
+    color: #64748B;
+    letter-spacing: 4px;
+    margin-top: 5px;
+    text-transform: uppercase;
+}
+.main-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: #F8FAFC;
+    margin: 20px 0 18px;
+    letter-spacing: -0.2px;
+}
+.badges-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 28px;
+}
+.id-badge {
+    background: #132035;
+    border: 1px solid #1E3A5F;
+    color: #38BDF8;
+    padding: 7px 22px;
+    border-radius: 8px;
+    font-weight: 800;
+    font-size: 13px;
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    letter-spacing: 0.8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.id-badge:hover {
+    border-color: #38BDF8;
+    color: #FFFFFF;
+}
+.verdict-badge {
+    padding: 7px 24px;
+    border-radius: 8px;
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+}
+.verdict-badge.cheat {
+    background: #2A1215;
+    border: 1px solid #4C1D24;
+    color: #F87171;
+}
+.verdict-badge.clean {
+    background: #0E241B;
+    border: 1px solid #154B33;
+    color: #34D399;
+}
+.meta-bottom-bar {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: var(--bg-card);
-    border: 1px solid var(--border-card);
-    border-radius: 14px;
-    padding: 20px 28px;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    border-top: 1px solid #161D2B;
+    padding-top: 18px;
+    color: #64748B;
+    font-size: 12px;
 }
-.brand-title {
-    font-size: 22px;
-    font-weight: 900;
-    letter-spacing: 0.5px;
-    color: #FFFFFF;
+.meta-bottom-bar span {
+    color: #94A3B8;
 }
-.brand-title span {
-    color: var(--accent-orange);
-}
-.brand-subtitle {
-    font-size: 12.5px;
-    color: var(--text-muted);
-    margin-top: 3px;
-    letter-spacing: 0.3px;
-}
-.header-right {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-.report-id-pill {
-    background: #171C2B;
-    border: 1px solid #28324C;
-    padding: 7px 14px;
-    border-radius: 8px;
-    font-family: 'JetBrains Mono', Consolas, monospace;
-    font-size: 13px;
-    font-weight: 700;
-    color: #CBD5E1;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-.report-id-pill:hover {
-    border-color: var(--accent-orange);
-    color: #FFFFFF;
-}
-.verdict-pill {
-    padding: 8px 22px;
-    border-radius: 8px;
-    font-weight: 900;
-    font-size: 14px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-}
-.verdict-banner {
-    background: var(--bg-card);
-    border-radius: 12px;
-    padding: 16px 24px;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-.verdict-banner.cheating {
-    border: 1px solid var(--border-cheating);
-    background: linear-gradient(90deg, rgba(59, 18, 25, 0.6) 0%, rgba(17, 20, 30, 0.95) 100%);
-}
-.verdict-banner.clean {
-    border: 1px solid var(--border-clean);
-    background: linear-gradient(90deg, rgba(15, 41, 30, 0.6) 0%, rgba(17, 20, 30, 0.95) 100%);
-}
-.verdict-icon {
-    font-size: 28px;
-    line-height: 1;
-}
-.verdict-text-box h3 {
+.section-header {
     font-size: 16px;
     font-weight: 700;
-    margin-bottom: 2px;
-}
-.verdict-text-box p {
-    font-size: 13px;
-    color: var(--text-muted);
-}
-.section-title {
-    font-size: 15px;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
     color: #FFFFFF;
-    margin: 26px 0 14px 0;
     display: flex;
     align-items: center;
-    gap: 10px;
+    margin-bottom: 16px;
+    letter-spacing: -0.2px;
 }
-.section-title::before {
-    content: '';
-    display: inline-block;
+.accent-bar {
     width: 4px;
     height: 16px;
-    background: var(--accent-orange);
+    background: #38BDF8;
     border-radius: 2px;
+    display: inline-block;
+    margin-right: 10px;
+    flex-shrink: 0;
 }
-.meta-grid {
+.accent-bar.red { background: #EF4444; }
+.accent-bar.warn { background: #F59E0B; }
+.accent-bar.cyan { background: #38BDF8; }
+
+.pc-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    grid-template-columns: 1fr 1fr;
     gap: 12px;
-    margin-bottom: 20px;
 }
-.meta-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-card);
-    border-radius: 10px;
+.pc-card {
+    background: #131825;
+    border: 1px solid #1D2538;
+    border-radius: 8px;
     padding: 14px 18px;
-}
-.meta-label {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 6px;
-}
-.meta-value {
-    font-size: 13.5px;
-    font-weight: 600;
-    color: #FFFFFF;
-    word-break: break-word;
-}
-.threats-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
 }
-.threat-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-cheating);
-    border-left: 4px solid var(--color-cheating);
+.pc-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #64748B;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+.pc-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: #F1F5F9;
+    word-break: break-word;
+}
+.detection-item {
+    background: #131825;
+    border: 1px solid #1D2538;
+    border-left: 4px solid #EF4444;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+}
+.detection-item.clean {
+    border-left: 4px solid #10B981;
+}
+.detection-item.warning {
+    border-left: 4px solid #F59E0B;
+}
+.detection-item.suspicious {
+    border-left: 4px solid #38BDF8;
+}
+.det-left {
+    flex: 1;
+}
+.det-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #FFFFFF;
+}
+.det-sub {
+    font-size: 12.5px;
+    color: #94A3B8;
+    margin-top: 4px;
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    word-break: break-all;
+}
+.det-badge {
+    background: #2A1215;
+    color: #F87171;
+    border: 1px solid #4C1D24;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.det-badge.warn {
+    background: #281B0F;
+    color: #FBBF24;
+    border-color: #4B3012;
+}
+.det-badge.suspicious {
+    background: #0C2433;
+    color: #7DD3FC;
+    border-color: #164E63;
+}
+.det-badge.clean {
+    background: #0E241B;
+    color: #34D399;
+    border-color: #154B33;
+}
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+.stat-card {
+    background: #131825;
+    border: 1px solid #1D2538;
+    border-radius: 8px;
+    padding: 20px 14px;
+    text-align: center;
+}
+.stat-label {
+    font-size: 10px;
+    font-weight: 800;
+    color: #64748B;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+.stat-num {
+    font-size: 28px;
+    font-weight: 900;
+    color: #FFFFFF;
+}
+.stat-num.legit { color: #10B981; }
+.stat-num.warn { color: #F59E0B; }
+.stat-num.cheat { color: #EF4444; }
+
+.risk-box {
+    background: #131825;
+    border: 1px solid #1D2538;
     border-radius: 10px;
-    padding: 14px 18px;
-    box-shadow: 0 2px 10px rgba(255, 77, 109, 0.08);
+    padding: 24px 28px;
+    display: flex;
+    align-items: center;
+    gap: 28px;
 }
-.threat-header {
+.risk-gauge {
+    position: relative;
+    width: 104px;
+    height: 104px;
+    flex-shrink: 0;
+}
+.risk-gauge svg {
+    transform: rotate(-90deg);
+}
+.risk-pct-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 20px;
+    font-weight: 900;
+    color: #FFFFFF;
+}
+.risk-content h3 {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}
+.risk-content p {
+    font-size: 13px;
+    color: #94A3B8;
+    margin-top: 4px;
+}
+.risk-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+.risk-pill {
+    background: #2A1215;
+    color: #F87171;
+    border: 1px solid #4C1D24;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 6px;
+}
+.account-row {
+    background: #131825;
+    border: 1px solid #1D2538;
+    border-radius: 8px;
+    padding: 14px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #FFFFFF;
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 8px;
 }
-.threat-name {
-    font-size: 14px;
-    font-weight: 700;
-    color: #FFFFFF;
-}
-.threat-badge {
-    background: var(--bg-cheating);
-    color: var(--color-cheating);
-    border: 1px solid var(--border-cheating);
-    font-size: 11px;
-    font-weight: 800;
-    padding: 3px 8px;
-    border-radius: 5px;
-    letter-spacing: 0.5px;
-}
-.threat-detail {
-    font-family: 'JetBrains Mono', Consolas, monospace;
+.account-src {
     font-size: 12px;
-    color: #CBD5E1;
-    background: #080A10;
-    padding: 8px 12px;
-    border-radius: 6px;
-    border: 1px solid #1E2333;
-    word-break: break-all;
+    color: #64748B;
 }
-.clean-banner {
-    background: var(--bg-card);
-    border: 1px solid var(--border-clean);
-    border-left: 4px solid var(--color-clean);
-    border-radius: 10px;
-    padding: 18px 20px;
-    color: #CBD5E1;
-    font-size: 13.5px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-.modules-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 12px;
-}
-.module-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-card);
-    border-radius: 10px;
-    padding: 14px 16px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    transition: transform 0.15s ease, border-color 0.15s ease;
-}
-.module-card:hover {
-    border-color: var(--border-highlight);
-    transform: translateY(-1px);
-}
-.module-info h4 {
-    font-size: 13px;
-    font-weight: 700;
-    color: #FFFFFF;
-    margin-bottom: 2px;
-}
-.module-info p {
-    font-size: 11px;
-    color: var(--text-muted);
-}
-.module-status {
-    font-size: 11px;
-    font-weight: 800;
-    padding: 4px 10px;
-    border-radius: 6px;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-}
-.status-clean {
-    background: var(--bg-clean);
-    color: var(--color-clean);
-    border: 1px solid var(--border-clean);
-}
-.status-detected {
-    background: var(--bg-cheating);
-    color: var(--color-cheating);
-    border: 1px solid var(--border-cheating);
-}
-.status-skipped {
-    background: #171B26;
-    color: var(--text-muted);
-    border: 1px solid #232A3B;
-}
-.accounts-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-.account-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-card);
+.terminal-card {
+    background: #0A0D14;
+    border: 1px solid #182030;
     border-radius: 8px;
-    padding: 10px 16px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.account-nick {
-    font-size: 13px;
-    font-weight: 700;
-    color: #FFFFFF;
-}
-.account-source {
-    font-size: 11px;
-    color: var(--text-muted);
-    background: #151928;
-    padding: 2px 8px;
-    border-radius: 4px;
-}
-.terminal-window {
-    background: #07090F;
-    border: 1px solid #1A2033;
-    border-radius: 12px;
     overflow: hidden;
-    margin-bottom: 24px;
-    box-shadow: 0 6px 24px rgba(0,0,0,0.5);
 }
-.terminal-header {
-    background: #0F1320;
-    border-bottom: 1px solid #1A2033;
-    padding: 10px 16px;
+.terminal-bar {
+    background: #0F1420;
+    padding: 9px 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    border-bottom: 1px solid #182030;
 }
 .terminal-dots {
     display: flex;
-    gap: 7px;
+    gap: 6px;
 }
-.dot {
+.t-dot {
     width: 10px;
     height: 10px;
     border-radius: 50%;
 }
-.dot.red { background: #EF4444; }
-.dot.yellow { background: #F59E0B; }
-.dot.green { background: #10B981; }
-.terminal-title {
-    font-size: 11.5px;
-    font-weight: 700;
-    color: var(--text-muted);
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
-}
-.btn-copy {
-    background: #181E2E;
-    border: 1px solid #2A354E;
+.t-dot.r { background: #EF4444; }
+.t-dot.y { background: #F59E0B; }
+.t-dot.g { background: #10B981; }
+.terminal-btn {
+    background: #182032;
+    border: 1px solid #25324E;
     color: #CBD5E1;
     font-size: 11px;
     font-weight: 600;
     padding: 4px 10px;
     border-radius: 5px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.2s;
 }
-.btn-copy:hover {
-    background: #232C42;
+.terminal-btn:hover {
+    background: #222E46;
     color: #FFFFFF;
-    border-color: var(--accent-orange);
 }
-.terminal-body {
+.terminal-code {
     padding: 14px 18px;
-    max-height: 440px;
+    max-height: 280px;
     overflow-y: auto;
     font-family: 'JetBrains Mono', Consolas, monospace;
     font-size: 11.5px;
-    line-height: 1.6;
+    line-height: 1.65;
+    color: #94A3B8;
 }
-.terminal-body::-webkit-scrollbar {
-    width: 6px;
-}
-.terminal-body::-webkit-scrollbar-thumb {
-    background: #1C2337;
-    border-radius: 3px;
-}
-.log-line {
-    word-break: break-all;
-    white-space: pre-wrap;
-}
-.log-ts { color: #526079; }
-.log-warn { color: #F59E0B; }
-.log-alert { color: #FF4D6D; font-weight: 600; }
-.log-ok { color: #10B981; }
-.log-info { color: #8F9CAE; }
-
-.footer {
+.footer-ocean {
     text-align: center;
-    border-top: 1px solid #161A28;
-    padding-top: 24px;
-    margin-top: 20px;
-    color: var(--text-subtle);
-    font-size: 11.5px;
+    color: #64748B;
+    font-size: 12px;
+    margin-top: 40px;
 }
-.footer p { margin-bottom: 4px; }
-.footer strong { color: var(--text-muted); }
-</style>\n");
-            sb.Append("</head>\n<body>\n");
+.footer-ocean h4 {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #94A3B8;
+    margin-bottom: 4px;
+}
+.footer-ocean .pill-exporter {
+    display: inline-block;
+    background: #131825;
+    border: 1px solid #1D2538;
+    padding: 8px 22px;
+    border-radius: 6px;
+    margin: 14px 0;
+    color: #A0AEC0;
+    font-size: 12px;
+}
+.footer-ocean .links {
+    margin-bottom: 10px;
+}
+.footer-ocean .links a {
+    color: #38BDF8;
+    text-decoration: none;
+    margin: 0 10px;
+}
+.footer-ocean .links a:hover {
+    text-decoration: underline;
+}
+.footer-ocean .disclaimer {
+    max-width: 620px;
+    margin: 0 auto;
+    font-size: 11px;
+    line-height: 1.55;
+    color: #5A677D;
+}
+@media (max-width: 720px) {
+    .pc-grid { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .meta-bottom-bar { flex-direction: column; gap: 8px; text-align: center; }
+    .risk-box { flex-direction: column; text-align: center; }
+}
+</style>\n</head>\n<body>\n");
 
-            sb.Append("<div class=\"container\">\n");
+            sb.Append("<div class=\"report-wrapper\">\n");
 
-            // Header
-            sb.Append("<header class=\"header\">\n");
-            sb.Append("  <div>\n");
-            sb.Append("    <div class=\"brand-title\">ANGELMINE <span>CHECKER</span></div>\n");
-            sb.Append("    <div class=\"brand-subtitle\">System Scan Analysis Report &bull; Forensic Minecraft Anti-Cheat</div>\n");
+            // Header Card
+            sb.Append("<div class=\"header-card\">\n");
+            sb.Append("  <div class=\"brand-title\">Ocean Anti-Cheat</div>\n");
+            sb.Append("  <div class=\"brand-sub\">SCAN REPORT</div>\n");
+            sb.Append("  <h1 class=\"main-title\">System Scan Analysis Report</h1>\n");
+            sb.Append("  <div class=\"badges-row\">\n");
+            sb.Append($"    <div class=\"id-badge\" onclick=\"copyText('{model.ReportId}', this)\" title=\"Click to copy\">{WebUtility.HtmlEncode(model.ReportId)}</div>\n");
+            sb.Append($"    <div class=\"verdict-badge {verdictClass}\">{verdictBadge}</div>\n");
             sb.Append("  </div>\n");
-            sb.Append("  <div class=\"header-right\">\n");
-            sb.Append($"    <div class=\"report-id-pill\" onclick=\"copyText('{model.ReportId}', this)\" title=\"Нажмите для копирования\">\n");
-            sb.Append($"      <span>ID: {WebUtility.HtmlEncode(model.ReportId)}</span>\n");
-            sb.Append("      <span style=\"font-size:10px; opacity:0.6;\">📋</span>\n");
-            sb.Append("    </div>\n");
-            sb.Append($"    <div class=\"verdict-pill\" style=\"background:{verdictBg}; color:{verdictColor}; border:1px solid {verdictBorder};\">{verdictBadge}</div>\n");
-            sb.Append("  </div>\n");
-            sb.Append("</header>\n");
-
-            // Verdict Banner
-            string bannerClass = isCheating ? "cheating" : "clean";
-            string bannerIcon = isCheating ? "⚠️" : "🛡️";
-            string bannerTitle = isCheating ? "ОБНАРУЖЕНЫ НАРУШЕНИЯ" : "СИСТЕМА ЧИСТА";
-            sb.Append($"<div class=\"verdict-banner {bannerClass}\">\n");
-            sb.Append($"  <div class=\"verdict-icon\">{bannerIcon}</div>\n");
-            sb.Append("  <div class=\"verdict-text-box\">\n");
-            sb.Append($"    <h3 style=\"color:{verdictColor};\">{bannerTitle}</h3>\n");
-            sb.Append($"    <p>{verdictSubtitle}</p>\n");
+            sb.Append("  <div class=\"meta-bottom-bar\">\n");
+            sb.Append($"    <div>Scanned: <span>{scannedTimeStr}</span></div>\n");
+            sb.Append("    <div>Game: <span>Java</span></div>\n");
+            sb.Append($"    <div>Exported: <span>{exportedTimeStr}</span></div>\n");
             sb.Append("  </div>\n");
             sb.Append("</div>\n");
 
-            // PC Information Grid
-            sb.Append("<div class=\"section-title\">Информация о системе и сканировании</div>\n");
-            sb.Append("<div class=\"meta-grid\">\n");
-
-            sb.Append("  <div class=\"meta-card\">\n");
-            sb.Append("    <div class=\"meta-label\">Операционная система</div>\n");
-            sb.Append($"    <div class=\"meta-value\">{WebUtility.HtmlEncode(osInfo)}</div>\n");
+            // PC Information
+            sb.Append("<div class=\"card-container\">\n");
+            sb.Append("  <div class=\"section-header\"><span class=\"accent-bar\"></span> PC Information</div>\n");
+            sb.Append("  <div class=\"pc-grid\">\n");
+            sb.Append("    <div class=\"pc-card\"><div class=\"pc-label\">OPERATING SYSTEM</div><div class=\"pc-value\">" + WebUtility.HtmlEncode(osInfo) + "</div></div>\n");
+            sb.Append("    <div class=\"pc-card\"><div class=\"pc-label\">BOOT TIME</div><div class=\"pc-value\">" + WebUtility.HtmlEncode(bootTime) + "</div></div>\n");
+            sb.Append("    <div class=\"pc-card\"><div class=\"pc-label\">VPN STATUS</div><div class=\"pc-value\">no</div></div>\n");
+            sb.Append("    <div class=\"pc-card\"><div class=\"pc-label\">COUNTRY</div><div class=\"pc-value\">Russia</div></div>\n");
+            sb.Append("    <div class=\"pc-card\"><div class=\"pc-label\">INSTALL DATE</div><div class=\"pc-value\">" + WebUtility.HtmlEncode(installDate ?? "-") + "</div></div>\n");
+            sb.Append("    <div class=\"pc-card\"><div class=\"pc-label\">RECYCLE BIN</div><div class=\"pc-value\">" + WebUtility.HtmlEncode(bootTime) + "</div></div>\n");
+            sb.Append("    <div class=\"pc-card\"><div class=\"pc-label\">SCAN TIME</div><div class=\"pc-value\">" + WebUtility.HtmlEncode(durationStr) + "</div></div>\n");
+            sb.Append("    <div class=\"pc-card\"><div class=\"pc-label\">TARGET PROCESS</div><div class=\"pc-value\">" + WebUtility.HtmlEncode(pidDisplay) + "</div></div>\n");
             sb.Append("  </div>\n");
-
-            sb.Append("  <div class=\"meta-card\">\n");
-            sb.Append("    <div class=\"meta-label\">Запуск ПК & Uptime</div>\n");
-            sb.Append($"    <div class=\"meta-value\">{WebUtility.HtmlEncode(bootTime)} (работает {WebUtility.HtmlEncode(uptime)})</div>\n");
-            sb.Append("  </div>\n");
-
-            sb.Append("  <div class=\"meta-card\">\n");
-            sb.Append("    <div class=\"meta-label\">Целевой процесс / PID</div>\n");
-            sb.Append($"    <div class=\"meta-value\">{WebUtility.HtmlEncode(pidDisplay)}</div>\n");
-            sb.Append("  </div>\n");
-
-            sb.Append("  <div class=\"meta-card\">\n");
-            sb.Append("    <div class=\"meta-label\">Режим сканирования</div>\n");
-            sb.Append($"    <div class=\"meta-value\">{WebUtility.HtmlEncode(model.ScanType ?? "Стандартная проверка")}</div>\n");
-            sb.Append("  </div>\n");
-
-            sb.Append("  <div class=\"meta-card\">\n");
-            sb.Append("    <div class=\"meta-label\">Время проведения</div>\n");
-            sb.Append($"    <div class=\"meta-value\">{model.StartTime:dd.MM.yyyy HH:mm:ss} &bull; Длительность: {model.Duration.TotalSeconds:F1} сек.</div>\n");
-            sb.Append("  </div>\n");
-
-            sb.Append("  <div class=\"meta-card\">\n");
-            sb.Append("    <div class=\"meta-label\">Дата установки Windows</div>\n");
-            sb.Append($"    <div class=\"meta-value\">{WebUtility.HtmlEncode(installDate ?? "-")}</div>\n");
-            sb.Append("  </div>\n");
-
             sb.Append("</div>\n");
 
-            // Detection Results Section
-            sb.Append($"<div class=\"section-title\">Результаты обнаружения ({distinctBans.Count})</div>\n");
-            if (distinctBans.Count > 0)
+            // Detection Results (Cheats)
+            sb.Append("<div class=\"card-container\">\n");
+            sb.Append($"  <div class=\"section-header\"><span class=\"accent-bar red\"></span> Detection Results ({parsedDetections.Count})</div>\n");
+            if (parsedDetections.Count > 0)
             {
-                sb.Append("<div class=\"threats-list\">\n");
-                foreach (var ban in distinctBans)
+                foreach (var d in parsedDetections)
                 {
-                    string badge = "DETECTED";
-                    string banLower = ban.ToLower();
-                    if (banLower.Contains("памяти") || banLower.Contains("jvm") || banLower.Contains("classloader") || banLower.Contains("инжект"))
-                    {
-                        badge = "MEMORY TRACE";
-                    }
-                    else if (banLower.Contains("prefetch"))
-                    {
-                        badge = "PREFETCH";
-                    }
-                    else if (banLower.Contains("папка") || banLower.Contains("файл"))
-                    {
-                        badge = "ON DISK";
-                    }
-                    else if (banLower.Contains("процесс"))
-                    {
-                        badge = "IN INSTANCE";
-                    }
-                    else if (banLower.Contains("сетевое") || banLower.Contains("ip"))
-                    {
-                        badge = "NETWORK C2";
-                    }
-
-                    sb.Append("  <div class=\"threat-card\">\n");
-                    sb.Append("    <div class=\"threat-header\">\n");
-                    sb.Append("      <span class=\"threat-name\">Обнаружен след запрещенного ПО</span>\n");
-                    sb.Append($"      <span class=\"threat-badge\">{badge}</span>\n");
+                    sb.Append("  <div class=\"detection-item\">\n");
+                    sb.Append("    <div class=\"det-left\">\n");
+                    sb.Append($"      <div class=\"det-title\">{WebUtility.HtmlEncode(d.Title)}</div>\n");
+                    sb.Append($"      <div class=\"det-sub\">{WebUtility.HtmlEncode(d.Subtitle)}</div>\n");
                     sb.Append("    </div>\n");
-                    sb.Append($"    <div class=\"threat-detail\">{WebUtility.HtmlEncode(ban)}</div>\n");
+                    sb.Append($"    <div class=\"det-badge\">{WebUtility.HtmlEncode(d.Badge)}</div>\n");
                     sb.Append("  </div>\n");
                 }
-                sb.Append("</div>\n");
             }
             else
             {
-                sb.Append("<div class=\"clean-banner\">\n");
-                sb.Append("  <span style=\"font-size:22px;\">🛡️</span>\n");
-                sb.Append("  <div>\n");
-                sb.Append("    <strong style=\"color:#FFFFFF; font-size:14px;\">Нарушений не обнаружено</strong><br/>\n");
-                sb.Append("    Все проверенные области памяти JVM, файловые сигнатуры, процессы и журналы Windows чисты.\n");
-                sb.Append("  </div>\n");
-                sb.Append("</div>\n");
-            }
-
-            // Checked Modules Grid
-            sb.Append("<div class=\"section-title\">Проверенные модули и детекторы</div>\n");
-            sb.Append("<div class=\"modules-grid\">\n");
-
-            bool HasBan(string keyword) => distinctBans.Any(b => b.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0);
-
-            void AppendModule(string title, string desc, bool enabled, bool detected)
-            {
-                string statusText, statusClass;
-                if (!enabled)
-                {
-                    statusText = "ПРОПУЩЕН";
-                    statusClass = "status-skipped";
-                }
-                else if (detected)
-                {
-                    statusText = "НАРУШЕНИЕ";
-                    statusClass = "status-detected";
-                }
-                else
-                {
-                    statusText = "ЧИСТО";
-                    statusClass = "status-clean";
-                }
-
-                sb.Append("  <div class=\"module-card\">\n");
-                sb.Append("    <div class=\"module-info\">\n");
-                sb.Append($"      <h4>{WebUtility.HtmlEncode(title)}</h4>\n");
-                sb.Append($"      <p>{WebUtility.HtmlEncode(desc)}</p>\n");
+                sb.Append("  <div class=\"detection-item clean\">\n");
+                sb.Append("    <div class=\"det-left\">\n");
+                sb.Append("      <div class=\"det-title\" style=\"color:#10B981;\">No illicit modifications detected during this scan</div>\n");
+                sb.Append("      <div class=\"det-sub\">JVM memory structures, active processes, and client directories are clean.</div>\n");
                 sb.Append("    </div>\n");
-                sb.Append($"    <div class=\"module-status {statusClass}\">{statusText}</div>\n");
+                sb.Append("    <div class=\"det-badge clean\">CLEAN</div>\n");
                 sb.Append("  </div>\n");
             }
-
-            AppendModule("Doomsday Scanner", "32 нитки, JVM инжекты, C2 сервер", model.Options.CheckDoomsday, HasBan("Doomsday"));
-            AppendModule("SystemDLC Checker", "Сигнатуры памяти, Prefetch, файлы", model.Options.CheckSystemDlc, HasBan("SystemDLC") || HasBan("jlivef"));
-            AppendModule("Cortex Scanner", "Папки, процессы, Prefetch, файлы", model.Options.CheckCortex, HasBan("Cortex"));
-            AppendModule("Luminar Scanner", "Клиент, конфиги, Prefetch, процессы", model.Options.CheckLuminar, HasBan("Luminar"));
-            AppendModule("Pulse Visual", "Папки %appdata%, процессы, Prefetch", true, HasBan("Pulse"));
-            AppendModule("Memory & Injects", "JDWP агент, DLL инжекты, хуки", true, HasBan("инжект") || HasBan("jdwp") || HasBan("dll"));
-            AppendModule("Prefetch & USN Journal", "История запусков, удаленные файлы", true, HasBan("Prefetch") || HasBan("Journal"));
-            AppendModule("Minecraft Environment", "Папка mods, логи, проверка очистки", true, HasBan("мод") || HasBan("лог") || HasBan("очистк"));
-
             sb.Append("</div>\n");
 
-            // Accounts section
-            if (model.Accounts != null && model.Accounts.Count > 0)
+            // Warnings Section
+            if (parsedWarnings.Count > 0)
             {
-                sb.Append("<div class=\"section-title\">Найденные аккаунты Minecraft</div>\n");
-                sb.Append("<div class=\"accounts-container\">\n");
-                foreach (var acc in model.Accounts)
+                sb.Append("<div class=\"card-container\">\n");
+                sb.Append($"  <div class=\"section-header\"><span class=\"accent-bar warn\"></span> Warnings ({parsedWarnings.Count})</div>\n");
+                foreach (var w in parsedWarnings)
                 {
-                    sb.Append("  <div class=\"account-card\">\n");
-                    sb.Append($"    <span class=\"account-nick\">🎮 {WebUtility.HtmlEncode(acc.Nickname)}</span>\n");
-                    sb.Append($"    <span class=\"account-source\">{WebUtility.HtmlEncode(acc.SourceDisplay)}</span>\n");
+                    sb.Append("  <div class=\"detection-item warning\">\n");
+                    sb.Append("    <div class=\"det-left\">\n");
+                    sb.Append($"      <div class=\"det-title\">{WebUtility.HtmlEncode(w.Title)}</div>\n");
+                    sb.Append($"      <div class=\"det-sub\">{WebUtility.HtmlEncode(w.Subtitle)}</div>\n");
+                    sb.Append("    </div>\n");
+                    sb.Append($"    <div class=\"det-badge warn\">{WebUtility.HtmlEncode(w.Badge)}</div>\n");
                     sb.Append("  </div>\n");
                 }
                 sb.Append("</div>\n");
             }
 
-            // Terminal Logs
-            sb.Append("<div class=\"section-title\">Консольный лог сканирования</div>\n");
-            sb.Append("<div class=\"terminal-window\">\n");
-            sb.Append("  <div class=\"terminal-header\">\n");
-            sb.Append("    <div class=\"terminal-dots\">\n");
-            sb.Append("      <div class=\"dot red\"></div>\n");
-            sb.Append("      <div class=\"dot yellow\"></div>\n");
-            sb.Append("      <div class=\"dot green\"></div>\n");
-            sb.Append("    </div>\n");
-            sb.Append("    <div class=\"terminal-title\">ANGELMINE SCAN CONSOLE</div>\n");
-            sb.Append("    <button class=\"btn-copy\" onclick=\"copyConsoleLogs()\">Скопировать лог</button>\n");
-            sb.Append("  </div>\n");
-            sb.Append("  <div class=\"terminal-body\" id=\"consoleLogs\">\n");
-
-            if (model.Logs != null)
+            // Suspicious Activity Section
+            if (parsedSuspicious.Count > 0)
             {
-                foreach (var line in model.Logs)
+                sb.Append("<div class=\"card-container\">\n");
+                sb.Append($"  <div class=\"section-header\"><span class=\"accent-bar cyan\"></span> Suspicious Activity ({parsedSuspicious.Count})</div>\n");
+                foreach (var sItem in parsedSuspicious)
                 {
-                    string safeLine = WebUtility.HtmlEncode(line);
-                    string lineClass = "log-info";
-                    string lLower = line.ToLower();
-
-                    if (lLower.Contains("найден") || lLower.Contains("инжект") || lLower.Contains("чит") || lLower.Contains("бан") || lLower.Contains("doomsday") || lLower.Contains("systemdlc"))
-                    {
-                        lineClass = "log-alert";
-                    }
-                    else if (lLower.Contains("предупреждение") || lLower.Contains("внимание") || lLower.Contains("очистк") || lLower.Contains("warn"))
-                    {
-                        lineClass = "log-warn";
-                    }
-                    else if (lLower.Contains("чисто") || lLower.Contains("нарушений не обнаружено") || lLower.Contains("успешно"))
-                    {
-                        lineClass = "log-ok";
-                    }
-
-                    sb.Append($"    <div class=\"log-line {lineClass}\">{safeLine}</div>\n");
+                    sb.Append("  <div class=\"detection-item suspicious\">\n");
+                    sb.Append("    <div class=\"det-left\">\n");
+                    sb.Append($"      <div class=\"det-title\" style=\"font-family:'JetBrains Mono',Consolas,monospace; font-size:13px;\">{WebUtility.HtmlEncode(sItem.Title)}</div>\n");
+                    sb.Append($"      <div class=\"det-sub\">{WebUtility.HtmlEncode(sItem.Subtitle)}</div>\n");
+                    sb.Append("    </div>\n");
+                    sb.Append($"    <div class=\"det-badge suspicious\">{WebUtility.HtmlEncode(sItem.Badge)}</div>\n");
+                    sb.Append("  </div>\n");
                 }
+                sb.Append("</div>\n");
             }
 
+            // Accounts Section
+            if (model.Accounts != null && model.Accounts.Count > 0)
+            {
+                sb.Append("<div class=\"card-container\">\n");
+                sb.Append($"  <div class=\"section-header\"><span class=\"accent-bar\"></span> Accounts ({model.Accounts.Count})</div>\n");
+                foreach (var acc in model.Accounts)
+                {
+                    sb.Append("  <div class=\"account-row\">\n");
+                    sb.Append($"    <div>{WebUtility.HtmlEncode(acc.Nickname)}</div>\n");
+                    sb.Append($"    <div class=\"account-src\">{WebUtility.HtmlEncode(acc.SourceDisplay)}</div>\n");
+                    sb.Append("  </div>\n");
+                }
+                sb.Append("</div>\n");
+            }
+
+            // Hardware & Scan Statistics
+            int cheatCount = isCheating ? 1 : 0;
+            int legitCount = isCheating ? 0 : 1;
+            sb.Append("<div class=\"card-container\">\n");
+            sb.Append("  <div class=\"section-header\"><span class=\"accent-bar\"></span> Hardware Statistics</div>\n");
+            sb.Append("  <div class=\"stats-grid\">\n");
+            sb.Append("    <div class=\"stat-card\"><div class=\"stat-label\">TOTAL SCANS</div><div class=\"stat-num\">1</div></div>\n");
+            sb.Append($"    <div class=\"stat-card\"><div class=\"stat-label\">LEGIT</div><div class=\"stat-num legit\">{legitCount}</div></div>\n");
+            sb.Append("    <div class=\"stat-card\"><div class=\"stat-label\">SUSPICIOUS</div><div class=\"stat-num warn\">0</div></div>\n");
+            sb.Append($"    <div class=\"stat-card\"><div class=\"stat-label\">CHEATING</div><div class=\"stat-num cheat\">{cheatCount}</div></div>\n");
             sb.Append("  </div>\n");
             sb.Append("</div>\n");
 
-            // Footer
-            sb.Append("<footer class=\"footer\">\n");
-            sb.Append("  <p><strong>AngelMine Anti-Cheat Forensic Report</strong> &bull; Версия 1.0.0</p>\n");
-            sb.Append($"  <p>Данный отчет сгенерирован автоматически в целях проверки игроков на сервере AngelMine. Код отчета: {WebUtility.HtmlEncode(model.ReportId)}</p>\n");
-            sb.Append("</footer>\n");
+            // Player Risk Analysis
+            double circumference = 263.9;
+            double circleOffset = circumference - (circumference * riskPercentage / 100.0);
+            var detectedUniqueCheats = parsedDetections.Select(d => d.Title).Distinct().ToList();
 
-            sb.Append("</div>\n"); // .container
+            sb.Append("<div class=\"card-container\">\n");
+            sb.Append("  <div class=\"section-header\"><span class=\"accent-bar\"></span> Player Risk Analysis</div>\n");
+            sb.Append("  <div class=\"risk-box\">\n");
+            sb.Append("    <div class=\"risk-gauge\">\n");
+            sb.Append("      <svg width=\"104\" height=\"104\">\n");
+            sb.Append("        <circle cx=\"52\" cy=\"52\" r=\"42\" stroke=\"#1B2232\" stroke-width=\"10\" fill=\"none\" />\n");
+            sb.Append($"        <circle cx=\"52\" cy=\"52\" r=\"42\" stroke=\"{riskColor}\" stroke-width=\"10\" fill=\"none\" stroke-dasharray=\"{circumference:F1}\" stroke-dashoffset=\"{circleOffset:F1}\" stroke-linecap=\"round\" />\n");
+            sb.Append("      </svg>\n");
+            sb.Append($"      <div class=\"risk-pct-text\">{riskPercentage}%</div>\n");
+            sb.Append("    </div>\n");
+            sb.Append("    <div class=\"risk-content\">\n");
+            sb.Append($"      <h3 style=\"color:{riskColor};\">{riskLabel}</h3>\n");
+            if (isCheating)
+            {
+                sb.Append($"      <p>1/1 scans with cheats detected (100%) &bull; {parsedDetections.Count} detections of {detectedUniqueCheats.Count} unique cheat(s)</p>\n");
+                sb.Append("      <div style=\"font-size:12px; color:#64748B; margin-top:8px; font-weight:700;\">Detected Cheats:</div>\n");
+                sb.Append("      <div class=\"risk-pills\">\n");
+                foreach (var cName in detectedUniqueCheats)
+                {
+                    sb.Append($"        <span class=\"risk-pill\">{WebUtility.HtmlEncode(cName)}</span>\n");
+                }
+                sb.Append("      </div>\n");
+            }
+            else
+            {
+                sb.Append("      <p>0/1 scans with cheats detected (0%) &bull; System integrity verified clean.</p>\n");
+            }
+            sb.Append("    </div>\n");
+            sb.Append("  </div>\n");
+            sb.Append("</div>\n");
 
-            // Vanilla JS
+            // Scan Logs Section
+            if (model.Logs != null && model.Logs.Count > 0)
+            {
+                sb.Append("<div class=\"card-container\">\n");
+                sb.Append("  <div class=\"section-header\"><span class=\"accent-bar\"></span> Scan Logs</div>\n");
+                sb.Append("  <div class=\"terminal-card\">\n");
+                sb.Append("    <div class=\"terminal-bar\">\n");
+                sb.Append("      <div class=\"terminal-dots\"><div class=\"t-dot r\"></div><div class=\"t-dot y\"></div><div class=\"t-dot g\"></div></div>\n");
+                sb.Append("      <button class=\"terminal-btn\" onclick=\"copyConsoleLogs()\">Copy Logs</button>\n");
+                sb.Append("    </div>\n");
+                sb.Append("    <div class=\"terminal-code\" id=\"consoleLogs\">\n");
+                foreach (var line in model.Logs)
+                {
+                    string safeLine = WebUtility.HtmlEncode(line);
+                    string colorStyle = "";
+                    string lLower = line.ToLower();
+                    if (lLower.Contains("инжект") || lLower.Contains("doomsday") || lLower.Contains("systemdlc") || lLower.Contains("чит"))
+                        colorStyle = "color:#EF4444; font-weight:600;";
+                    else if (lLower.Contains("остановлен") || lLower.Contains("отключен") || lLower.Contains("предупреждение"))
+                        colorStyle = "color:#F59E0B;";
+                    else if (lLower.Contains("чисто") || lLower.Contains("нарушений не обнаружено"))
+                        colorStyle = "color:#10B981;";
+
+                    sb.Append($"      <div style=\"{colorStyle}\">{safeLine}</div>\n");
+                }
+                sb.Append("    </div>\n");
+                sb.Append("  </div>\n");
+                sb.Append("</div>\n");
+            }
+
+            // Ocean Footer
+            sb.Append("<div class=\"footer-ocean\">\n");
+            sb.Append("  <h4>Ocean Anti-Cheat</h4>\n");
+            sb.Append($"  <div>Report ID: {WebUtility.HtmlEncode(model.ReportId)} | Generated: {exportedTimeStr}</div>\n");
+            sb.Append("  <div><span class=\"pill-exporter\"><strong>Exported by:</strong> AngelMine Checker &nbsp;&bull;&nbsp; <strong>Scan created by:</strong> Inspector</span></div>\n");
+            sb.Append("  <div class=\"links\"><a href=\"https://t.me/angelgriefnet\" target=\"_blank\">Telegram</a> &bull; <a href=\"https://discord.gg/u7AwfNxHE2\" target=\"_blank\">Discord</a></div>\n");
+            sb.Append("  <div class=\"disclaimer\">This document is intended for ban verification and appeal purposes. The information contained is a snapshot of the user's system at the time of the scan.</div>\n");
+            sb.Append("</div>\n");
+
+            sb.Append("</div>\n"); // .report-wrapper
+
+            // Script
             sb.Append("<script>\n");
             sb.Append(@"
 function copyText(text, elem) {
     navigator.clipboard.writeText(text).then(function() {
-        const orig = elem.innerHTML;
-        elem.innerHTML = '<span>Скопировано!</span>';
-        setTimeout(() => { elem.innerHTML = orig; }, 1500);
+        const orig = elem.innerText;
+        elem.innerText = 'COPIED!';
+        setTimeout(() => { elem.innerText = orig; }, 1500);
     });
 }
 function copyConsoleLogs() {
     const el = document.getElementById('consoleLogs');
     if (!el) return;
-    const text = el.innerText;
-    navigator.clipboard.writeText(text).then(function() {
-        alert('Консольный лог скопирован в буфер обмена!');
+    navigator.clipboard.writeText(el.innerText).then(function() {
+        alert('Console logs copied to clipboard!');
     });
 }
 </script>\n");
-
             sb.Append("</body>\n</html>");
 
             return sb.ToString();

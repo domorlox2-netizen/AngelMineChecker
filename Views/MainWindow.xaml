@@ -579,17 +579,18 @@
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
-                        <Grid Margin="0,2">
+                        <Grid Margin="0,3">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Border x:Name="box" Width="18" Height="18" Background="#121624" BorderBrush="#252D42" BorderThickness="1.5" CornerRadius="4" VerticalAlignment="Center">
-                                <Path x:Name="checkMark" Data="M 3 8 L 7 12 L 14 4" Stroke="#FFFFFF" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                            <Border x:Name="box" Width="17" Height="17" Background="#111420" BorderBrush="#252D42" BorderThickness="1.5" CornerRadius="4" VerticalAlignment="Center">
+                                <Path x:Name="checkMark" Data="M 3 8 L 6.5 11.5 L 13 4" Stroke="#FFFFFF" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
                             </Border>
                             <ContentPresenter Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="False"/>
                         </Grid>
@@ -607,7 +608,7 @@
                                 <Setter TargetName="checkMark" Property="Visibility" Value="Visible"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="box" Property="BorderBrush" Value="#FF6B00"/>
+                                <Setter TargetName="box" Property="BorderBrush" Value="#FF7A00"/>
                                 <Setter Property="Foreground" Value="#FFFFFF"/>
                             </Trigger>
                         </ControlTemplate.Triggers>

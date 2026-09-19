@@ -53,7 +53,9 @@ namespace AngelMineChecker
         private const uint PROCESS_VM_READ = 0x0010;
         private const uint PROCESS_QUERY_INFORMATION = 0x0400;
         private const uint MEM_COMMIT = 0x1000;
+        private const uint PAGE_READONLY = 0x02;
         private const uint PAGE_READWRITE = 0x04;
+        private const uint PAGE_EXECUTE_READ = 0x20;
         private const uint PAGE_EXECUTE_READWRITE = 0x40;
         private const uint PAGE_NOACCESS = 0x01;
         private const uint PAGE_GUARD = 0x100;
@@ -63,13 +65,15 @@ namespace AngelMineChecker
         {
             public string Name { get; set; }
             public bool IsSystemDlc { get; set; }
+            public bool IsDoomsday { get; set; }
             public byte[] AsciiBytes { get; set; }
             public byte[] UnicodeBytes { get; set; }
 
-            public SearchPattern(string name, bool isSystemDlc = false)
+            public SearchPattern(string name, bool isSystemDlc = false, bool isDoomsday = false)
             {
                 Name = name;
                 IsSystemDlc = isSystemDlc;
+                IsDoomsday = isDoomsday;
                 AsciiBytes = Encoding.ASCII.GetBytes(name);
                 UnicodeBytes = Encoding.Unicode.GetBytes(name);
             }
@@ -80,23 +84,35 @@ namespace AngelMineChecker
             return Encoding.UTF8.GetString(Convert.FromBase64String(b64));
         }
 
-        private static readonly List<SearchPattern> PrecompiledMemoryPatterns = new List<SearchPattern>
+        private static readonly List<SearchPattern> PrecompiledMemoryPatterns = BuildPrecompiledPatterns();
+
+        private static List<SearchPattern> BuildPrecompiledPatterns()
         {
-            new SearchPattern("triggerbot"),
-            new SearchPattern("aimassist"),
-            new SearchPattern("dear imgui"),
-            new SearchPattern("imgui::createcontext"),
-            new SearchPattern("imgui_impl_win32"),
-            new SearchPattern("doomsdayclient.xyz"),
-            new SearchPattern("doomsdayclient"),
-            new SearchPattern(DecodeSig("NjdjZnVlZ3UwcDhybQ=="), true),
-            new SearchPattern(DecodeSig("QVJST1dfUklHSFRaT05UQUw="), true),
-            new SearchPattern(DecodeSig("RFJPUERPV05fU1VDQ0VTUw=="), true),
-            new SearchPattern(DecodeSig("dG9vbHRpcF9hcnJvd191cA=="), true),
-            new SearchPattern(DecodeSig("TjFZMEc2emZ6MEVTSm9DSQ=="), true),
-            new SearchPattern(DecodeSig("YXJTQnFCUWZiVW5GUFRHZQ=="), true),
-            new SearchPattern(DecodeSig("dX1weG10aG9iaV1kWF5SWExSRkxARjo/MzgsMSYq"), true)
-        };
+            var list = new List<SearchPattern>
+            {
+                new SearchPattern("triggerbot"),
+                new SearchPattern("aimassist"),
+                new SearchPattern("dear imgui"),
+                new SearchPattern("imgui::createcontext"),
+                new SearchPattern("imgui_impl_win32"),
+                new SearchPattern("doomsdayclient.xyz", false, true),
+                new SearchPattern("doomsdayclient", false, true),
+                new SearchPattern(DecodeSig("NjdjZnVlZ3UwcDhybQ=="), true),
+                new SearchPattern(DecodeSig("QVJST1dfUklHSFRaT05UQUw="), true),
+                new SearchPattern(DecodeSig("RFJPUERPV05fU1VDQ0VTUw=="), true),
+                new SearchPattern(DecodeSig("dG9vbHRpcF9hcnJvd191cA=="), true),
+                new SearchPattern(DecodeSig("TjFZMEc2emZ6MEVTSm9DSQ=="), true),
+                new SearchPattern(DecodeSig("YXJTQnFCUWZiVW5GUFRHZQ=="), true),
+                new SearchPattern(DecodeSig("dX1weG10aG9iaV1kWF5SWExSRkxARjo/MzgsMSYq"), true)
+            };
+
+            foreach (var str in CheckDoomsday.DoomsdayStrings)
+            {
+                list.Add(new SearchPattern(str, false, true));
+            }
+
+            return list;
+        }
 
         private static readonly HashSet<string> WhitelistedJreDlls = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -902,23 +918,24 @@ namespace AngelMineChecker
                     int scannedRegions = 0;
                     var foundSignatures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                    const int bufferSize = 262144;
+                    const int bufferSize = 1048576;
                     byte[] buffer = new byte[bufferSize];
 
                     var sw = Stopwatch.StartNew();
 
                     while (VirtualQueryEx(hProcess, address, out mbi, (uint)structSize) == structSize)
                     {
-                        if (sw.ElapsedMilliseconds > 3000 || scannedRegions > 300)
+                        if (sw.ElapsedMilliseconds > 20000 || scannedRegions > 4000)
                             break;
 
                         if (mbi.State == MEM_COMMIT &&
                             (mbi.Protect & PAGE_GUARD) == 0 &&
                             (mbi.Protect & PAGE_NOACCESS) == 0 &&
-                            ((mbi.Protect & PAGE_READWRITE) != 0 || (mbi.Protect & PAGE_EXECUTE_READWRITE) != 0))
+                            ((mbi.Protect & PAGE_READWRITE) != 0 || (mbi.Protect & PAGE_EXECUTE_READWRITE) != 0 ||
+                             (mbi.Protect & PAGE_READONLY) != 0 || (mbi.Protect & PAGE_EXECUTE_READ) != 0))
                         {
                             long regionBytes = mbi.RegionSize.ToInt64();
-                            long bytesToReadTotal = Math.Min(regionBytes, 2097152);
+                            long bytesToReadTotal = Math.Min(regionBytes, 33554432);
                             long offset = 0;
 
                             while (offset < bytesToReadTotal)
@@ -943,6 +960,11 @@ namespace AngelMineChecker
                                                     log($"Найден след SystemDLC в памяти процесса PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
                                                     banReasons.Add($"Найден след SystemDLC в памяти процесса (PID {pid}) - {pat.Name}");
                                                 }
+                                                else if (pat.IsDoomsday)
+                                                {
+                                                    log($"Найдена строка чита Doomsday в памяти процесса PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
+                                                    banReasons.Add($"Строка чита Doomsday в памяти Java ({pat.Name} в PID {pid})");
+                                                }
                                                 else
                                                 {
                                                     log($"Найдена сигнатура в памяти PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
@@ -953,7 +975,8 @@ namespace AngelMineChecker
                                     }
                                 }
 
-                                offset += chunk;
+                                int step = Math.Max(chunk - 512, 1);
+                                offset += step;
                             }
 
                             scannedRegions++;
@@ -982,22 +1005,27 @@ namespace AngelMineChecker
         {
             if (pattern == null || pattern.Length == 0 || length < pattern.Length) return false;
             byte first = pattern[0];
-            int max = length - pattern.Length;
-            for (int i = 0; i <= max; i++)
+            int patLen = pattern.Length;
+            int maxStart = length - patLen;
+            int start = 0;
+
+            while (start <= maxStart)
             {
-                if (buffer[i] == first)
+                int idx = Array.IndexOf(buffer, first, start, length - start);
+                if (idx < 0 || idx > maxStart) return false;
+
+                bool match = true;
+                for (int j = 1; j < patLen; j++)
                 {
-                    bool match = true;
-                    for (int j = 1; j < pattern.Length; j++)
+                    if (buffer[idx + j] != pattern[j])
                     {
-                        if (buffer[i + j] != pattern[j])
-                        {
-                            match = false;
-                            break;
-                        }
+                        match = false;
+                        break;
                     }
-                    if (match) return true;
                 }
+                if (match) return true;
+
+                start = idx + 1;
             }
             return false;
         }
