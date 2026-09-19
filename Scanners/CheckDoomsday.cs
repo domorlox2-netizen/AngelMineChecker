@@ -747,6 +747,28 @@ namespace AngelMineChecker
                                     string trimmed = line.Trim();
                                     if (string.IsNullOrEmpty(trimmed)) continue;
 
+                                    if (trimmed.Contains("<boot class loader>") || trimmed.Contains("<bootstrap>") ||
+                                        trimmed.StartsWith("0x0000000000000000") || !trimmed.StartsWith("0x") ||
+                                        trimmed.StartsWith("Total") || trimmed.StartsWith("ClassLoader"))
+                                    {
+                                        continue;
+                                    }
+
+                                    if (trimmed.Contains("jdk.") || trimmed.Contains("java.") || trimmed.Contains("sun.") ||
+                                        trimmed.Contains("com.sun.") || trimmed.Contains("net.fabricmc.") ||
+                                        trimmed.Contains("cpw.mods.") || trimmed.Contains("net.minecraftforge.") ||
+                                        trimmed.Contains("org.spongepowered.") || trimmed.Contains("net.minecraft.") ||
+                                        trimmed.Contains("com.mojang.") || trimmed.Contains("org.bukkit.") ||
+                                        trimmed.Contains("net.md_5.") || trimmed.Contains("io.papermc.") ||
+                                        trimmed.Contains("org.apache.") || trimmed.Contains("org.slf4j.") ||
+                                        trimmed.Contains("org.springframework.") || trimmed.Contains("net.legacylauncher.") ||
+                                        trimmed.Contains("org.tlauncher.") || trimmed.Contains("kotlin.") ||
+                                        trimmed.Contains("scala.") || trimmed.Contains("groovy.") ||
+                                        trimmed.Contains("ch.qos.logback.") || trimmed.Contains("org.lwjgl."))
+                                    {
+                                        continue;
+                                    }
+
                                     bool isSus = false;
                                     string clInfo = "";
 
@@ -756,24 +778,16 @@ namespace AngelMineChecker
                                         isSus = true;
                                         clInfo = trimmed;
                                     }
-                                    else if (!trimmed.Contains("jdk.internal") && !trimmed.Contains("net.fabricmc") &&
-                                             !trimmed.Contains("cpw.mods") && !trimmed.Contains("net.minecraftforge") &&
-                                             !trimmed.Contains("org.spongepowered") && !trimmed.Contains("net.minecraft") &&
-                                             !trimmed.Contains("com.mojang") && !trimmed.Contains("org.bukkit") &&
-                                             !trimmed.Contains("net.md_5") && !trimmed.Contains("io.papermc") &&
-                                             !trimmed.Contains("org.apache") && !trimmed.Contains("org.slf4j"))
+                                    else
                                     {
                                         string[] cols = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                                        if (cols.Length >= 4 && int.TryParse(cols[3], out int classCount) && classCount >= 800)
+                                        if (cols.Length >= 4 && int.TryParse(cols[3], out int classCount) && classCount >= 1000)
                                         {
-                                            isSus = true;
-                                            clInfo = trimmed;
-                                        }
-                                        else if ((trimmed.Contains("0x0000000800053298") || trimmed.Contains("ClassLoaders$AppClassLoader")) &&
-                                                 cols.Length >= 4 && int.TryParse(cols[3], out int cc) && cc >= 500)
-                                        {
-                                            isSus = true;
-                                            clInfo = trimmed;
+                                            if (trimmed.Contains("/0x") || trimmed.Contains(" . ") || trimmed.Contains("  "))
+                                            {
+                                                isSus = true;
+                                                clInfo = trimmed;
+                                            }
                                         }
                                     }
 
@@ -974,8 +988,7 @@ namespace AngelMineChecker
 
                             if (int.TryParse(pidStr, out int pid) && targetPids.Contains(pid))
                             {
-                                if (remoteAddr.StartsWith("172.67.138.") || remoteAddr.StartsWith("104.21.48.") || remoteAddr.StartsWith("165.22.196.") ||
-                                    remoteAddr.StartsWith("138.124.3.") || remoteAddr.StartsWith("77.110.111."))
+                                if (remoteAddr.StartsWith("172.67.138.") || remoteAddr.StartsWith("104.21.48.") || remoteAddr.StartsWith("165.22.196."))
                                 {
                                     if (state.Equals("ESTABLISHED", StringComparison.OrdinalIgnoreCase) || state.Equals("SYN_SENT", StringComparison.OrdinalIgnoreCase))
                                     {
