@@ -73,6 +73,12 @@ namespace AngelMineChecker
 
         private static readonly MemorySignature[] JvmMemorySignatures = new[]
         {
+            new MemorySignature("0 1 /", "class"),
+            new MemorySignature("0 1 .", "class"),
+            new MemorySignature("gqgv3", "classloader"),
+            new MemorySignature("dd2o", "classloader"),
+            new MemorySignature("gqgd4", "class"),
+            new MemorySignature("gqgi", "class"),
             new MemorySignature("post /font/", "font"),
             new MemorySignature("get /font/", "font"),
             new MemorySignature("/font/arial_", "font"),
@@ -93,6 +99,7 @@ namespace AngelMineChecker
             new MemorySignature("--doomsdayversion", "cheat"),
             new MemorySignature("--clickguikey", "cheat"),
             new MemorySignature("com/doomsday/tweaker", "cheat"),
+            new MemorySignature("com/doomsday", "cheat"),
             new MemorySignature("failed to inject jvmti agent", "cheat"),
             new MemorySignature("z4mfltptb", "cheat"),
             new MemorySignature("net/java/s", "class"),
@@ -109,6 +116,10 @@ namespace AngelMineChecker
 
         private static readonly byte[][] MemoryAnchors = new[]
         {
+            Encoding.ASCII.GetBytes("0 1 /"),
+            Encoding.ASCII.GetBytes("0 1 ."),
+            Encoding.ASCII.GetBytes("gqg"),
+            Encoding.ASCII.GetBytes("dd2o"),
             Encoding.ASCII.GetBytes("doomsday"),
             Encoding.ASCII.GetBytes("z4mfltptb"),
             Encoding.ASCII.GetBytes("/font/"),
@@ -619,6 +630,136 @@ namespace AngelMineChecker
             return found;
         }
 
+        public static int CheckInjectedClassLoaders(int? preferredPid, Action<string> log, List<string> banReasons)
+        {
+            int found = 0;
+            try
+            {
+                var targetPids = new List<int>();
+                if (preferredPid.HasValue && preferredPid.Value > 0)
+                {
+                    targetPids.Add(preferredPid.Value);
+                }
+
+                foreach (var p in Process.GetProcessesByName("javaw").Concat(Process.GetProcessesByName("java")))
+                {
+                    if (!targetPids.Contains(p.Id))
+                        targetPids.Add(p.Id);
+                }
+
+                if (targetPids.Count == 0) return 0;
+
+                string FindJcmd(Process proc)
+                {
+                    try
+                    {
+                        string procExe = proc.MainModule?.FileName;
+                        if (!string.IsNullOrEmpty(procExe))
+                        {
+                            string dir = Path.GetDirectoryName(procExe);
+                            string jcmdCandidate = Path.Combine(dir, "jcmd.exe");
+                            if (File.Exists(jcmdCandidate)) return jcmdCandidate;
+                        }
+                    }
+                    catch { }
+
+                    string jh = Environment.GetEnvironmentVariable("JAVA_HOME");
+                    if (!string.IsNullOrEmpty(jh))
+                    {
+                        string jcmdJh = Path.Combine(jh, "bin", "jcmd.exe");
+                        if (File.Exists(jcmdJh)) return jcmdJh;
+                    }
+
+                    string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                    string javaDir = Path.Combine(pf, "Java");
+                    if (Directory.Exists(javaDir))
+                    {
+                        try
+                        {
+                            foreach (var jdk in Directory.GetDirectories(javaDir))
+                            {
+                                string jcmdPf = Path.Combine(jdk, "bin", "jcmd.exe");
+                                if (File.Exists(jcmdPf)) return jcmdPf;
+                            }
+                        }
+                        catch { }
+                    }
+
+                    return "jcmd.exe";
+                }
+
+                foreach (int pid in targetPids)
+                {
+                    try
+                    {
+                        Process proc = null;
+                        try { proc = Process.GetProcessById(pid); } catch { }
+                        if (proc == null || proc.HasExited) continue;
+
+                        string jcmdPath = FindJcmd(proc);
+
+                        var psi = new ProcessStartInfo
+                        {
+                            FileName = jcmdPath,
+                            Arguments = $"{pid} VM.classloader_stats",
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            CreateNoWindow = true
+                        };
+
+                        using (var p = Process.Start(psi))
+                        {
+                            string output = p.StandardOutput.ReadToEnd();
+                            p.WaitForExit(3500);
+
+                            if (string.IsNullOrEmpty(output)) continue;
+
+                            using (var reader = new StringReader(output))
+                            {
+                                string line;
+                                while ((line = reader.ReadLine()) != null)
+                                {
+                                    string trimmed = line.Trim();
+                                    if (string.IsNullOrEmpty(trimmed)) continue;
+
+                                    bool isSus = false;
+                                    string clInfo = "";
+
+                                    if (trimmed.Contains("0 1 .") || trimmed.Contains("gqg") || trimmed.Contains("dd2o") ||
+                                        trimmed.Contains("net.java") || trimmed.Contains("doomsday"))
+                                    {
+                                        isSus = true;
+                                        clInfo = trimmed;
+                                    }
+                                    else if ((trimmed.Contains("\t") || trimmed.Contains("   ")) &&
+                                             (trimmed.Contains("0x0000000800053298") || trimmed.Contains("ClassLoaders$AppClassLoader")) &&
+                                             !trimmed.Contains("jdk.internal") && !trimmed.Contains("net.fabricmc") &&
+                                             !trimmed.Contains("cpw.mods") && !trimmed.Contains("net.minecraftforge"))
+                                    {
+                                        isSus = true;
+                                        clInfo = trimmed;
+                                    }
+
+                                    if (isSus)
+                                    {
+                                        log?.Invoke($"Обнаружен внедрённый ClassLoader Doomsday в процессе Java (PID {pid}): {clInfo}");
+                                        banReasons.Add($"Инжект Doomsday в процесс PID {pid} (внедрённый ClassLoader чита: {clInfo})");
+                                        found++;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            return found;
+        }
+
         public static int CheckDnsCache(Action<string> log, List<string> banReasons)
         {
             int found = 0;
@@ -797,7 +938,8 @@ namespace AngelMineChecker
 
                             if (int.TryParse(pidStr, out int pid) && targetPids.Contains(pid))
                             {
-                                if (remoteAddr.StartsWith("172.67.138.") || remoteAddr.StartsWith("104.21.48.") || remoteAddr.StartsWith("165.22.196."))
+                                if (remoteAddr.StartsWith("172.67.138.") || remoteAddr.StartsWith("104.21.48.") || remoteAddr.StartsWith("165.22.196.") ||
+                                    remoteAddr.StartsWith("138.124.3.") || remoteAddr.StartsWith("77.110.111."))
                                 {
                                     if (state.Equals("ESTABLISHED", StringComparison.OrdinalIgnoreCase) || state.Equals("SYN_SENT", StringComparison.OrdinalIgnoreCase))
                                     {
@@ -845,13 +987,13 @@ namespace AngelMineChecker
 
                         long maxAddress = 0x7FFFFFFF0000;
                         long currentAddress = 0;
-                        byte[] buffer = new byte[262144];
+                        byte[] buffer = new byte[2097152];
                         var detectedInPid = new HashSet<string>();
                         var sw = Stopwatch.StartNew();
 
                         while (currentAddress < maxAddress)
                         {
-                            if (detectedInPid.Count >= 5 || sw.ElapsedMilliseconds > 3500) break;
+                            if (detectedInPid.Count >= 5 || sw.ElapsedMilliseconds > 6000) break;
 
                             MEMORY_BASIC_INFORMATION mbi;
                             int res = VirtualQueryEx(hProcess, new IntPtr(currentAddress), out mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION)));
@@ -873,7 +1015,7 @@ namespace AngelMineChecker
 
                                 while (offset < bytesToRead)
                                 {
-                                    if (detectedInPid.Count >= 5 || sw.ElapsedMilliseconds > 3500) break;
+                                    if (detectedInPid.Count >= 5 || sw.ElapsedMilliseconds > 6000) break;
 
                                     int chunk = (int)Math.Min((long)buffer.Length, bytesToRead - offset);
                                     IntPtr readAddr = new IntPtr(mbi.BaseAddress.ToInt64() + offset);
@@ -906,7 +1048,9 @@ namespace AngelMineChecker
                                                     {
                                                         detectedInPid.Add(sig.Pattern);
                                                         string desc;
-                                                        if (sig.Category == "font")
+                                                        if (sig.Category == "classloader")
+                                                            desc = $"Внедрённый ClassLoader Doomsday в Java ({sig.Pattern} в PID {pid})";
+                                                        else if (sig.Category == "font")
                                                             desc = $"Сетевая загрузка шрифтов Doomsday в Java ({sig.Pattern} в PID {pid})";
                                                         else if (sig.Category == "network")
                                                             desc = $"Сетевое обращение Java к серверу Doomsday ({sig.Pattern} в PID {pid})";
@@ -924,7 +1068,7 @@ namespace AngelMineChecker
                                             }
                                         }
                                     }
-                                    int step = Math.Max(chunk - 256, 1);
+                                    int step = Math.Max(chunk - 512, 1);
                                     offset += step;
                                 }
                             }
@@ -1247,6 +1391,7 @@ namespace AngelMineChecker
             await Task.Run(() =>
             {
                 totalFound += CheckActiveProcesses(null, internalReasons);
+                totalFound += CheckInjectedClassLoaders(targetPid, null, internalReasons);
                 totalFound += CheckJnaModules(targetPid, null, internalReasons);
                 totalFound += CheckLoopbackPorts(targetPid, null, internalReasons);
                 totalFound += CheckJvmAttach(null, internalReasons);
