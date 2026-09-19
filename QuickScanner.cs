@@ -145,7 +145,7 @@ namespace AngelMineChecker
 
             log("Проверяем следы отчистки");
             await Task.Delay(350);
-            CheckCleanupActivity(log);
+            CheckCleanupActivity(log, banReasons);
             await Task.Delay(300);
 
             CheckRecentDownloads(log, banReasons);
@@ -543,6 +543,130 @@ namespace AngelMineChecker
             ".lunarclient", "lunarclient", "curseforge", "prismlauncher"
         };
 
+        private static readonly HashSet<string> SuspiciousCleanerFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "cleaner.bat", "clean.bat", "clear.bat", "clear_logs.bat", "cleanjournal.bat",
+            "usn_cleaner.bat", "usncleaner.bat", "wipe.bat", "wiper.bat", "bypass.bat",
+            "anticheck.bat", "anti_check.bat", "clean_pc.bat", "stringcleaner.bat",
+            "string_cleaner.bat", "cleanstrings.bat", "clean_strings.bat", "journal.bat",
+            "cleanram.bat", "flush.bat", "batcleaner.bat", "ocean_cleaner.bat", "del_journal.bat",
+            "deljournal.bat", "fix_check.bat", "clean_usn.bat", "cleanusn.bat", "eventcleaner.bat",
+            "clear_all.bat", "clean_all.bat", "cleaner.cmd", "clean.cmd", "bypass.cmd",
+            "cleaner.ps1", "clean.ps1", "bypass.ps1", "clean_logs.ps1", "wiper.ps1"
+        };
+
+        public static bool CheckFileForCleanerCommands(string filePath, out string detectionReason)
+        {
+            detectionReason = "";
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return false;
+            if (IsCheckerOrSelf(filePath)) return false;
+
+            try
+            {
+                var fi = new FileInfo(filePath);
+                if (fi.Length == 0 || fi.Length > 2 * 1024 * 1024) return false;
+
+                string fileName = fi.Name.ToLowerInvariant();
+                string ext = fi.Extension.ToLowerInvariant();
+                if (ext != ".bat" && ext != ".cmd" && ext != ".ps1" && ext != ".vbs")
+                    return false;
+
+                string content;
+                try { content = File.ReadAllText(filePath); }
+                catch { return false; }
+
+                if (string.IsNullOrWhiteSpace(content)) return false;
+
+                string lower = content.ToLowerInvariant();
+                var foundTriggers = new List<string>();
+
+                if (lower.Contains("fsutil") && lower.Contains("deletejournal"))
+                {
+                    foundTriggers.Add("очистка USN Journal (fsutil usn deletejournal)");
+                }
+                else if (lower.Contains("deletejournal"))
+                {
+                    foundTriggers.Add("удаление журнала USN (deletejournal)");
+                }
+                else if (lower.Contains("fsutil") && lower.Contains("usn") && lower.Contains("createjournal"))
+                {
+                    foundTriggers.Add("пересоздание USN Journal (fsutil usn createjournal)");
+                }
+
+                if (lower.Contains("wevtutil") && (lower.Contains(" cl ") || lower.Contains(" cl\"") || lower.Contains(" cl %") || lower.Contains("clear-log") || lower.EndsWith(" cl")))
+                {
+                    foundTriggers.Add("очистка EventLog (wevtutil cl)");
+                }
+                else if (lower.Contains("clear-eventlog"))
+                {
+                    foundTriggers.Add("очистка EventLog (Clear-EventLog)");
+                }
+
+                if (lower.Contains("reg") && lower.Contains("delete"))
+                {
+                    if (lower.Contains(@"\bam") || lower.Contains(@"services\bam"))
+                    {
+                        foundTriggers.Add("очистка BAM в реестре");
+                    }
+                    if (lower.Contains("userassist"))
+                    {
+                        foundTriggers.Add("очистка UserAssist в реестре");
+                    }
+                    if (lower.Contains("recentdocs") || lower.Contains("opensavepidlmru"))
+                    {
+                        foundTriggers.Add("очистка RecentDocs/OpenSavePidlMRU");
+                    }
+                    if (lower.Contains("appswitched") || lower.Contains("muicache") || lower.Contains("compatibility assistant"))
+                    {
+                        foundTriggers.Add("очистка кэша запуска программ в реестре");
+                    }
+                }
+
+                if ((lower.Contains("net stop") || lower.Contains("sc stop") || lower.Contains("stop-service")) &&
+                    (lower.Contains("pcasvc") || lower.Contains("dps") || lower.Contains("sysmain") || lower.Contains("diagtrack")))
+                {
+                    foundTriggers.Add("остановка системных служб логов (PcaSvc/DPS/SysMain)");
+                }
+
+                if ((lower.Contains("del") || lower.Contains("erase") || lower.Contains("rd") || lower.Contains("rmdir") || lower.Contains("remove-item")) &&
+                    lower.Contains("prefetch"))
+                {
+                    foundTriggers.Add("удаление файлов Prefetch");
+                }
+
+                if ((lower.Contains("del") || lower.Contains("erase") || lower.Contains("remove-item")) &&
+                    (lower.Contains(@"\.minecraft\logs") || lower.Contains(@"\.minecraft\crash-reports") || lower.Contains("latest.log")))
+                {
+                    foundTriggers.Add("удаление логов Minecraft");
+                }
+
+                if (lower.Contains("emptystandbylist") || lower.Contains("rammap") ||
+                    (lower.Contains("strings") && (lower.Contains("clean") || lower.Contains("wipe") || lower.Contains("clear"))) ||
+                    (lower.Contains("cleanmem") || lower.Contains("memorycleaner")))
+                {
+                    foundTriggers.Add("очистка стрингов/памяти (RAM/Strings cleaner)");
+                }
+
+                if (foundTriggers.Count > 0)
+                {
+                    detectionReason = string.Join(", ", foundTriggers);
+                    return true;
+                }
+
+                if (SuspiciousCleanerFileNames.Contains(fileName))
+                {
+                    if (lower.Contains("flushdns") || lower.Contains("del") || lower.Contains("rd ") || lower.Contains("rmdir") || lower.Contains("powershell"))
+                    {
+                        detectionReason = $"подозрительный скрипт очистки ({fileName})";
+                        return true;
+                    }
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
         private static void ScanCheatDirectory(
             DirectoryInfo dir,
             int currentDepth,
@@ -584,6 +708,16 @@ namespace AngelMineChecker
                                 }
                                 found++;
                                 break;
+                            }
+                        }
+
+                        if (fName.EndsWith(".bat") || fName.EndsWith(".cmd") || fName.EndsWith(".ps1") || fName.EndsWith(".vbs"))
+                        {
+                            if (CheckFileForCleanerCommands(file.FullName, out string cleanerReason))
+                            {
+                                log($"Найден клинер: {file.Name} ({file.FullName}) [{cleanerReason}]");
+                                banReasons.Add($"Найден клинер ({file.Name}) - {cleanerReason} [{file.FullName}]");
+                                found++;
                             }
                         }
                     }
@@ -1619,7 +1753,7 @@ namespace AngelMineChecker
             return (threats, warnings);
         }
 
-        internal static int CheckCleanupActivity(Action<string> log)
+        internal static int CheckCleanupActivity(Action<string> log, List<string> banReasons)
         {
             int warnings = 0;
 
@@ -1719,7 +1853,120 @@ namespace AngelMineChecker
             }
             catch { }
 
+            warnings += CheckCleanerBatScripts(log, banReasons);
+
             return warnings;
+        }
+
+        internal static int CheckCleanerBatScripts(Action<string> log, List<string> banReasons)
+        {
+            int found = 0;
+            var dirsToScan = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (Directory.Exists(userProfile))
+            {
+                dirsToScan.Add(userProfile);
+                string uDl = Path.Combine(userProfile, "Downloads");
+                if (Directory.Exists(uDl)) dirsToScan.Add(uDl);
+                string uDt = Path.Combine(userProfile, "Desktop");
+                if (Directory.Exists(uDt)) dirsToScan.Add(uDt);
+                string uDocs = Path.Combine(userProfile, "Documents");
+                if (Directory.Exists(uDocs)) dirsToScan.Add(uDocs);
+            }
+
+            string tempDir = Path.GetTempPath();
+            if (Directory.Exists(tempDir)) dirsToScan.Add(tempDir);
+
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            if (Directory.Exists(appData))
+            {
+                string mc = Path.Combine(appData, ".minecraft");
+                if (Directory.Exists(mc)) dirsToScan.Add(mc);
+                string tl = Path.Combine(appData, ".tlauncher");
+                if (Directory.Exists(tl)) dirsToScan.Add(tl);
+            }
+
+            try
+            {
+                foreach (var drive in DriveInfo.GetDrives())
+                {
+                    if (drive.IsReady && (drive.DriveType == DriveType.Fixed || drive.DriveType == DriveType.Removable))
+                    {
+                        string r = drive.RootDirectory.FullName;
+                        dirsToScan.Add(r);
+                        string dl = Path.Combine(r, "Downloads");
+                        if (Directory.Exists(dl)) dirsToScan.Add(dl);
+                        string dt = Path.Combine(r, "Desktop");
+                        if (Directory.Exists(dt)) dirsToScan.Add(dt);
+                        string gm = Path.Combine(r, "Games");
+                        if (Directory.Exists(gm)) dirsToScan.Add(gm);
+                        string mc = Path.Combine(r, "Minecraft");
+                        if (Directory.Exists(mc)) dirsToScan.Add(mc);
+                        string ch = Path.Combine(r, "Cheats");
+                        if (Directory.Exists(ch)) dirsToScan.Add(ch);
+                        string chRu = Path.Combine(r, "Читы");
+                        if (Directory.Exists(chRu)) dirsToScan.Add(chRu);
+                        string sf = Path.Combine(r, "Soft");
+                        if (Directory.Exists(sf)) dirsToScan.Add(sf);
+                    }
+                }
+            }
+            catch { }
+
+            var subDirs = new List<string>();
+            foreach (var dir in dirsToScan)
+            {
+                try
+                {
+                    if (Directory.Exists(dir))
+                    {
+                        foreach (var sub in Directory.GetDirectories(dir))
+                        {
+                            if (!IsCheckerOrSelf(sub) && !SkipScanFolderNames.Contains(Path.GetFileName(sub).ToLower()))
+                            {
+                                subDirs.Add(sub);
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+            foreach (var s in subDirs) dirsToScan.Add(s);
+
+            var checkedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var dir in dirsToScan)
+            {
+                try
+                {
+                    if (!Directory.Exists(dir)) continue;
+
+                    string[] patterns = new[] { "*.bat", "*.cmd", "*.ps1", "*.vbs" };
+                    foreach (var pat in patterns)
+                    {
+                        string[] files;
+                        try { files = Directory.GetFiles(dir, pat, SearchOption.TopDirectoryOnly); }
+                        catch { continue; }
+
+                        foreach (var f in files)
+                        {
+                            if (!checkedFiles.Add(f)) continue;
+                            if (IsCheckerOrSelf(f)) continue;
+
+                            if (CheckFileForCleanerCommands(f, out string reason))
+                            {
+                                log?.Invoke($"Найден клинер: {Path.GetFileName(f)} ({f}) [{reason}]");
+                                banReasons.Add($"Найден клинер ({Path.GetFileName(f)}) - {reason} [{f}]");
+                                found++;
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            return found;
         }
 
         internal static void CheckModsDeletedAfterMinecraftLaunch(List<string> modsDirs, List<string> logsDirs, Action<string> log, List<string> banReasons)
@@ -1983,6 +2230,7 @@ namespace AngelMineChecker
                     try
                     {
                         string pName = proc.ProcessName.ToLower();
+                        bool matched = false;
                         foreach (var kw in CheatKeywords)
                         {
                             if (pName.Contains(kw) && pName != "angelminechecker")
@@ -1990,7 +2238,23 @@ namespace AngelMineChecker
                                 log($"Найден активный процесс: {proc.ProcessName}.exe (PID: {proc.Id})");
                                 banReasons.Add($"Активный процесс: {proc.ProcessName}.exe (PID: {proc.Id})");
                                 threats++;
+                                matched = true;
                                 break;
+                            }
+                        }
+
+                        if (!matched)
+                        {
+                            string[] cleanerProcKeywords = new[] { "usncleaner", "journalcleaner", "emptystandbylist", "rammap", "stringcleaner", "ocean_cleaner", "wiper" };
+                            foreach (var ckw in cleanerProcKeywords)
+                            {
+                                if (pName.Contains(ckw) && pName != "angelminechecker")
+                                {
+                                    log($"Найден активный процесс клинера: {proc.ProcessName}.exe (PID: {proc.Id})");
+                                    banReasons.Add($"Активный процесс клинера: {proc.ProcessName}.exe (PID: {proc.Id})");
+                                    threats++;
+                                    break;
+                                }
                             }
                         }
                     }

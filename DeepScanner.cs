@@ -144,7 +144,7 @@ namespace AngelMineChecker
 
             log("Проверяем следы отчистки");
             await Task.Delay(250);
-            QuickScanner.CheckCleanupActivity(log);
+            QuickScanner.CheckCleanupActivity(log, banReasons);
             await Task.Delay(150);
 
             QuickScanner.CheckRecentDownloads(log, banReasons);
