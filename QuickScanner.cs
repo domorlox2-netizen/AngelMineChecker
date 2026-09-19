@@ -21,7 +21,7 @@ namespace AngelMineChecker
             "catlavan", "wildclient", "expensive", "akrien", "wurst",
             "meteor", "bleachhack", "liquidbounce", "matrix",
             "fluegel", "flügel", "zamorozka", "neverlose", "exhi",
-            "impact", "aristois", "sigma", "xros", "minced", "excellent", "vape",
+            "xros", "minced", "excellent", "vape",
             "doomsday", "doomday", "jlivef"
         };
 
@@ -61,7 +61,7 @@ namespace AngelMineChecker
                 "automyst", "auto_myst", "mystloot", "myst_loot", "chestevent", "chest_event",
                 "cheststealer", "chest_stealer", "chest-stealer", "chest stealer",
                 "cheststealler", "chest_stealler", "chest-stealler", "chest stealler",
-                "autochestloot", "chestloot", "chest_loot"),
+                "autochestloot", "autoloot", "auto_loot"),
 
             new ForbiddenModRule("invis", "показ невидимок", "показ невидимок",
                 "torohealth", "player_highlighter", "playerhighlighter", "truesight", "true_sight", "tracers", "entity_outliner", "entityoutliner", "showinvis", "invisibleshow"),
@@ -91,7 +91,7 @@ namespace AngelMineChecker
                 "freecam", "free_cam", "camerahack"),
 
             new ForbiddenModRule("minimap", "запрещенная миникарта", "запрещенная миникарта",
-                "xaerosminimap", "xaeros_minimap", "xerosminimap", "xeros_minimap", "xaerominimap", "xaero.minimap", "xaeromap"),
+                "xaerosminimap", "xaeros_minimap", "xerosminimap", "xeros_minimap", "xaerominimap", "xaero.minimap"),
 
             new ForbiddenModRule("tweakeroo", "Tweakeroo", "Tweakeroo",
                 "tweakeroo"),
@@ -150,6 +150,8 @@ namespace AngelMineChecker
 
             CheckRecentDownloads(log, banReasons);
             CheckSuspiciousProcesses(log, banReasons);
+
+            await CheckDoomsday.RunDoomsdayCheckAsync(log, banReasons);
 
             log("");
             log("");
@@ -242,6 +244,77 @@ namespace AngelMineChecker
                 }
             }
 
+            try
+            {
+                foreach (var drive in DriveInfo.GetDrives())
+                {
+                    if (!drive.IsReady || (drive.DriveType != DriveType.Fixed && drive.DriveType != DriveType.Removable))
+                        continue;
+                    string r = drive.RootDirectory.FullName;
+                    var driveCandidates = new[]
+                    {
+                        Path.Combine(r, ".minecraft"),
+                        Path.Combine(r, "Minecraft"),
+                        Path.Combine(r, "Games", ".minecraft"),
+                        Path.Combine(r, "Games", "Minecraft"),
+                        Path.Combine(r, "Игры", ".minecraft"),
+                        Path.Combine(r, "Игры", "Minecraft"),
+                        Path.Combine(r, ".tlauncher"),
+                        Path.Combine(r, "TLauncher"),
+                        Path.Combine(r, "Games", ".tlauncher"),
+                        Path.Combine(r, "Games", "TLauncher"),
+                        Path.Combine(r, "PrismLauncher", "instances"),
+                        Path.Combine(r, "Games", "PrismLauncher", "instances"),
+                        Path.Combine(r, "curseforge", "minecraft", "Instances")
+                    };
+
+                    foreach (var dCandidate in driveCandidates)
+                    {
+                        if (Directory.Exists(dCandidate))
+                        {
+                            string m = Path.Combine(dCandidate, "mods");
+                            if (Directory.Exists(m)) modsDirs.Add(m);
+                            string l = Path.Combine(dCandidate, "logs");
+                            if (Directory.Exists(l)) logsDirs.Add(l);
+
+                            string versionsDir = Path.Combine(dCandidate, "versions");
+                            if (Directory.Exists(versionsDir))
+                            {
+                                try
+                                {
+                                    foreach (var vSub in Directory.GetDirectories(versionsDir))
+                                    {
+                                        string vm = Path.Combine(vSub, "mods");
+                                        if (Directory.Exists(vm)) modsDirs.Add(vm);
+                                    }
+                                }
+                                catch { }
+                            }
+
+                            if (dCandidate.EndsWith("instances", StringComparison.OrdinalIgnoreCase))
+                            {
+                                try
+                                {
+                                    foreach (var inst in Directory.GetDirectories(dCandidate))
+                                    {
+                                        string im = Path.Combine(inst, "mods");
+                                        if (Directory.Exists(im)) modsDirs.Add(im);
+                                        string il = Path.Combine(inst, "logs");
+                                        if (Directory.Exists(il)) logsDirs.Add(il);
+                                        string icm = Path.Combine(inst, ".minecraft", "mods");
+                                        if (Directory.Exists(icm)) modsDirs.Add(icm);
+                                        string icl = Path.Combine(inst, ".minecraft", "logs");
+                                        if (Directory.Exists(icl)) logsDirs.Add(icl);
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
             var clientCandidates = new[]
             {
                 Path.Combine(appData, ".pulse"),
@@ -257,6 +330,56 @@ namespace AngelMineChecker
                 Path.Combine(appData, "Badlion Client"),
                 Path.Combine(userProfile, ".lunarclient", "offline", "multiver")
             };
+
+            var lunarRoots = new[]
+            {
+                Path.Combine(userProfile, ".lunarclient"),
+                Path.Combine(appData, ".lunarclient"),
+                Path.Combine(localAppData, ".lunarclient"),
+                Path.Combine(userProfile, "lunarclient"),
+                Path.Combine(appData, "lunarclient"),
+                Path.Combine(localAppData, "Programs", "launcher", ".lunarclient")
+            };
+
+            foreach (var lRoot in lunarRoots)
+            {
+                if (Directory.Exists(lRoot))
+                {
+                    string directMods = Path.Combine(lRoot, "mods");
+                    if (Directory.Exists(directMods)) modsDirs.Add(directMods);
+                    string directLogs = Path.Combine(lRoot, "logs");
+                    if (Directory.Exists(directLogs)) logsDirs.Add(directLogs);
+
+                    string settingsGame = Path.Combine(lRoot, "settings", "game");
+                    if (Directory.Exists(settingsGame))
+                    {
+                        string sgMods = Path.Combine(settingsGame, "mods");
+                        if (Directory.Exists(sgMods)) modsDirs.Add(sgMods);
+                        string sgLogs = Path.Combine(settingsGame, "logs");
+                        if (Directory.Exists(sgLogs)) logsDirs.Add(sgLogs);
+                    }
+
+                    string offlineDir = Path.Combine(lRoot, "offline");
+                    if (Directory.Exists(offlineDir))
+                    {
+                        try
+                        {
+                            foreach (var sub in Directory.GetDirectories(offlineDir))
+                            {
+                                string sm = Path.Combine(sub, "mods");
+                                if (Directory.Exists(sm)) modsDirs.Add(sm);
+                                string sl = Path.Combine(sub, "logs");
+                                if (Directory.Exists(sl)) logsDirs.Add(sl);
+                                string sa = Path.Combine(sub, "addons");
+                                if (Directory.Exists(sa)) modsDirs.Add(sa);
+                            }
+                        }
+                        catch { }
+                    }
+
+                    SearchForModsAndLogs(lRoot, 0, 5, modsDirs, logsDirs);
+                }
+            }
 
             foreach (var baseDir in clientCandidates)
             {
@@ -285,7 +408,7 @@ namespace AngelMineChecker
                 }
             }
 
-            if (modsDirs.Count == 0 && (Process.GetProcessesByName("javaw").Length > 0 || Process.GetProcessesByName("java").Length > 0))
+            if (Process.GetProcessesByName("javaw").Length > 0 || Process.GetProcessesByName("java").Length > 0)
             {
                 try
                 {
@@ -389,12 +512,125 @@ namespace AngelMineChecker
                 foreach (var d in Directory.GetDirectories(currentDir))
                 {
                     string name = Path.GetFileName(d).ToLower();
-                    if (name == "mods") mods.Add(d);
+                    if (name == "mods" || name == "addons" || name == "user-mods" || name == "custom-mods") mods.Add(d);
                     else if (name == "logs") logs.Add(d);
-                    else if (name != "resourcepacks" && name != "saves" && name != "shaderpacks" && name != "assets")
+                    else if (name != "resourcepacks" && name != "saves" && name != "shaderpacks" && name != "assets" && name != "cache" && name != "natives" && name != "textures")
                     {
                         SearchForModsAndLogs(d, depth + 1, maxDepth, mods, logs);
                     }
+                }
+            }
+            catch { }
+        }
+
+        private static readonly HashSet<string> SkipScanFolderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "$recycle.bin", "system volume information", "windows", "perflogs", "recovery",
+            "program files", "program files (x86)", "msocache", "node_modules", "package cache",
+            "steamapps", "steam", "epic games", "riot games", "ubisoft", "gog galaxy",
+            "assets", "resourcepacks", "shaderpacks", "textures", "saves", "natives",
+            "cache", "libraries", "jre", "jdk", "runtime", ".git", ".svn", ".idea", ".vscode",
+            "microsoft", "windowsapps"
+        };
+
+        private static readonly HashSet<string> DeepScanFolderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "games", "игры", "minecraft", ".minecraft", "майнкрафт", "mc",
+            "tlauncher", ".tlauncher", "cheats", "читы", "soft", "софт",
+            "clients", "клиенты", "launchers", "лаунчеры", "versions",
+            "downloads", "загрузки", "desktop", "рабочий стол", "documents", "документы",
+            "users", "пользователи", "instances", ".feather", ".pulse", "badlion client",
+            ".lunarclient", "lunarclient", "curseforge", "prismlauncher"
+        };
+
+        private static void ScanCheatDirectory(
+            DirectoryInfo dir,
+            int currentDepth,
+            int maxDepth,
+            Action<string> log,
+            List<string> banReasons,
+            ref int found,
+            HashSet<string> visitedDirs)
+        {
+            if (dir == null || currentDepth > maxDepth) return;
+            string fullPath;
+            try { fullPath = dir.FullName; } catch { return; }
+
+            if (!visitedDirs.Add(fullPath)) return;
+            if (IsCheckerOrSelf(fullPath)) return;
+
+            try
+            {
+                foreach (var file in dir.EnumerateFiles())
+                {
+                    if (IsCheckerOrSelf(file.FullName)) continue;
+                    try
+                    {
+                        string fName = file.Name.ToLower();
+                        if (fName == "desktop.ini" || fName == "thumbs.db" || fName == ".ds_store")
+                            continue;
+
+                        foreach (var kw in CheatKeywords)
+                        {
+                            if (fName.Contains(kw))
+                            {
+                                log($"Найден: Файл {file.Name} ({file.FullName})");
+                                banReasons.Add($"Найден файл чита - {file.Name} ({file.FullName})");
+                                lock (DetectedCheatFolders)
+                                {
+                                    if (!DetectedCheatFolders.ContainsKey(kw))
+                                        DetectedCheatFolders[kw] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                    DetectedCheatFolders[kw].Add(file.FullName);
+                                }
+                                found++;
+                                break;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            if (currentDepth >= maxDepth) return;
+
+            try
+            {
+                foreach (var sub in dir.EnumerateDirectories())
+                {
+                    if (IsCheckerOrSelf(sub.FullName)) continue;
+                    try
+                    {
+                        if ((sub.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                        string subName = sub.Name.ToLower();
+                        if (SkipScanFolderNames.Contains(subName)) continue;
+
+                        bool isCheat = false;
+                        foreach (var kw in CheatKeywords)
+                        {
+                            if (subName.Contains(kw))
+                            {
+                                log($"Найден: Папка {sub.Name} ({sub.FullName})");
+                                banReasons.Add($"Найдена папка чита - {sub.Name} ({sub.FullName})");
+                                lock (DetectedCheatFolders)
+                                {
+                                    if (!DetectedCheatFolders.ContainsKey(kw))
+                                        DetectedCheatFolders[kw] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                    DetectedCheatFolders[kw].Add(sub.FullName);
+                                }
+                                found++;
+                                isCheat = true;
+                                break;
+                            }
+                        }
+
+                        if (!isCheat)
+                        {
+                            int nextMax = DeepScanFolderNames.Contains(subName) ? maxDepth : Math.Min(currentDepth + 1, maxDepth);
+                            ScanCheatDirectory(sub, currentDepth + 1, nextMax, log, banReasons, ref found, visitedDirs);
+                        }
+                    }
+                    catch { }
                 }
             }
             catch { }
@@ -411,7 +647,45 @@ namespace AngelMineChecker
                 {
                     if (drive.IsReady && (drive.DriveType == DriveType.Fixed || drive.DriveType == DriveType.Removable))
                     {
-                        searchRoots.Add(drive.RootDirectory.FullName);
+                        string r = drive.RootDirectory.FullName;
+                        searchRoots.Add(r);
+
+                        string[] extraPaths = new[]
+                        {
+                            Path.Combine(r, "Games"),
+                            Path.Combine(r, "Игры"),
+                            Path.Combine(r, "Minecraft"),
+                            Path.Combine(r, ".minecraft"),
+                            Path.Combine(r, "Minecraft", "versions"),
+                            Path.Combine(r, ".minecraft", "versions"),
+                            Path.Combine(r, "Games", "Minecraft"),
+                            Path.Combine(r, "Games", ".minecraft"),
+                            Path.Combine(r, "Games", "Minecraft", "versions"),
+                            Path.Combine(r, "Games", ".minecraft", "versions"),
+                            Path.Combine(r, "Игры", "Minecraft"),
+                            Path.Combine(r, "Игры", ".minecraft"),
+                            Path.Combine(r, "Игры", "Minecraft", "versions"),
+                            Path.Combine(r, "Игры", ".minecraft", "versions"),
+                            Path.Combine(r, "Cheats"),
+                            Path.Combine(r, "Читы"),
+                            Path.Combine(r, "Soft"),
+                            Path.Combine(r, "Софт"),
+                            Path.Combine(r, "Clients"),
+                            Path.Combine(r, "Клиенты"),
+                            Path.Combine(r, "TLauncher"),
+                            Path.Combine(r, ".tlauncher"),
+                            Path.Combine(r, "Downloads"),
+                            Path.Combine(r, "Загрузки"),
+                            Path.Combine(r, "Desktop"),
+                            Path.Combine(r, "Рабочий стол"),
+                            Path.Combine(r, "Documents"),
+                            Path.Combine(r, "Документы")
+                        };
+
+                        foreach (var ep in extraPaths)
+                        {
+                            if (Directory.Exists(ep)) searchRoots.Add(ep);
+                        }
                     }
                 }
             }
@@ -426,9 +700,18 @@ namespace AngelMineChecker
             string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             string tempDir = Path.GetTempPath();
 
+            if (Directory.Exists(userProfile))
+            {
+                searchRoots.Add(userProfile);
+                string uDownloads = Path.Combine(userProfile, "Downloads");
+                if (Directory.Exists(uDownloads)) searchRoots.Add(uDownloads);
+                string uDesktop = Path.Combine(userProfile, "Desktop");
+                if (Directory.Exists(uDesktop)) searchRoots.Add(uDesktop);
+                string uDocs = Path.Combine(userProfile, "Documents");
+                if (Directory.Exists(uDocs)) searchRoots.Add(uDocs);
+            }
             if (Directory.Exists(appData)) searchRoots.Add(appData);
             if (Directory.Exists(localAppData)) searchRoots.Add(localAppData);
-            if (Directory.Exists(userProfile)) searchRoots.Add(userProfile);
             if (Directory.Exists(programData)) searchRoots.Add(programData);
             if (Directory.Exists(tempDir)) searchRoots.Add(tempDir);
 
@@ -446,72 +729,16 @@ namespace AngelMineChecker
             string tlVersions = Path.Combine(appData, ".tlauncher", "legacy", "Minecraft", "game", "versions");
             if (Directory.Exists(tlVersions)) searchRoots.Add(tlVersions);
 
+            var visitedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var root in searchRoots.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 try
                 {
+                    if (!Directory.Exists(root)) continue;
                     var dirInfo = new DirectoryInfo(root);
-                    foreach (var sub in dirInfo.EnumerateDirectories())
-                    {
-                        if (IsCheckerOrSelf(sub.FullName)) continue;
-                        try
-                        {
-                            string name = sub.Name.ToLower();
-                            bool isHidden = (sub.Attributes & FileAttributes.Hidden) != 0;
-                            bool isSystem = (sub.Attributes & FileAttributes.System) != 0;
-
-                            foreach (var kw in CheatKeywords)
-                            {
-                                if (name.Contains(kw))
-                                {
-                                    if (kw == "impact" && (name.Contains("genshin") || name.Contains("hoyoverse") || name.Contains("mihoyo") || name.Contains("hoyoplay")))
-                                        continue;
-
-                                    log($"Найден: Папка {sub.Name} ({sub.FullName})");
-                                    banReasons.Add($"Найдена папка чита - {sub.Name} ({sub.FullName})");
-                                    lock (DetectedCheatFolders)
-                                    {
-                                        if (!DetectedCheatFolders.ContainsKey(kw)) DetectedCheatFolders[kw] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                                        DetectedCheatFolders[kw].Add(sub.FullName);
-                                    }
-                                    found++;
-                                    break;
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-
-                    foreach (var file in dirInfo.EnumerateFiles())
-                    {
-                        if (IsCheckerOrSelf(file.FullName)) continue;
-                        try
-                        {
-                            string fName = file.Name.ToLower();
-                            if (fName == "desktop.ini" || fName == "thumbs.db" || fName == ".ds_store")
-                                continue;
-
-                            foreach (var kw in CheatKeywords)
-                            {
-                                if (fName.Contains(kw))
-                                {
-                                    if (kw == "impact" && (fName.Contains("genshin") || fName.Contains("hoyoverse") || fName.Contains("mihoyo") || fName.Contains("hoyoplay")))
-                                        continue;
-
-                                    log($"Найден: Файл {file.Name} ({file.FullName})");
-                                    banReasons.Add($"Найден файл чита - {file.Name} ({file.FullName})");
-                                    lock (DetectedCheatFolders)
-                                    {
-                                        if (!DetectedCheatFolders.ContainsKey(kw)) DetectedCheatFolders[kw] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                                        DetectedCheatFolders[kw].Add(file.FullName);
-                                    }
-                                    found++;
-                                    break;
-                                }
-                            }
-                        }
-                        catch { }
-                    }
+                    int depthLimit = (dirInfo.Parent == null) ? 4 : 3;
+                    ScanCheatDirectory(dirInfo, 0, depthLimit, log, banReasons, ref found, visitedDirs);
                 }
                 catch { }
             }
@@ -524,7 +751,7 @@ namespace AngelMineChecker
             int found = 0;
             string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-            var checkFolders = new[]
+            var checkFolders = new List<string>
             {
                 userProfile,
                 Path.Combine(userProfile, "Downloads"),
@@ -532,7 +759,23 @@ namespace AngelMineChecker
                 Path.Combine(userProfile, "Documents")
             };
 
-            foreach (var folder in checkFolders)
+            try
+            {
+                foreach (var drive in DriveInfo.GetDrives())
+                {
+                    if (drive.IsReady && (drive.DriveType == DriveType.Fixed || drive.DriveType == DriveType.Removable))
+                    {
+                        string r = drive.RootDirectory.FullName;
+                        string dl = Path.Combine(r, "Downloads");
+                        if (Directory.Exists(dl)) checkFolders.Add(dl);
+                        string dt = Path.Combine(r, "Desktop");
+                        if (Directory.Exists(dt)) checkFolders.Add(dt);
+                    }
+                }
+            }
+            catch { }
+
+            foreach (var folder in checkFolders.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 if (!Directory.Exists(folder)) continue;
 
@@ -549,14 +792,6 @@ namespace AngelMineChecker
                             log($"Найден: Инжектор {Path.GetFileName(f)} ({f})");
                             banReasons.Add($"Инжектор {Path.GetFileName(f)}");
                             found++;
-                            continue;
-                        }
-
-                        if (CheckDoomsdayJar(new FileInfo(f), out string dReason))
-                        {
-                            log($"Найден чит Doomsday: {Path.GetFileName(f)} ({f}) [{dReason}]");
-                            banReasons.Add($"Найден Doomsday - {f} ({dReason})");
-                            found++;
                         }
                     }
                 }
@@ -568,141 +803,7 @@ namespace AngelMineChecker
 
         public static bool CheckDoomsdayJar(FileInfo file, out string reason)
         {
-            reason = "";
-            if (file == null || !file.Exists) return false;
-            if (IsCheckerOrSelf(file.FullName)) return false;
-
-            try
-            {
-                long len = file.Length;
-                if (len < 512 || len > 35 * 1024 * 1024) return false;
-
-                string ext = file.Extension.ToLower();
-
-                bool isZip = false;
-                using (var fs = file.OpenRead())
-                {
-                    byte[] magic = new byte[4];
-                    int read = fs.Read(magic, 0, 4);
-                    if (read >= 2 && magic[0] == 0x50 && magic[1] == 0x4B)
-                    {
-                        isZip = true;
-                    }
-                }
-
-                bool isDllDisguised = (ext == ".dll" && isZip);
-
-                if (len >= 28000 && len <= 35000)
-                {
-                    byte[] raw = File.ReadAllBytes(file.FullName);
-                    string rawUtf8 = Encoding.UTF8.GetString(raw);
-                    if (rawUtf8.Contains("net/minecraft/client/entity/player/ClientPlayerEntity") ||
-                        rawUtf8.Contains("net/minecraft/util/math/AxisAlignedBB"))
-                    {
-                        reason = isDllDisguised
-                            ? "Doomsday, замаскированный под .dll (размер ~30KB и сигнатура Entity/AxisAlignedBB)"
-                            : "размер ~30KB и сигнатура Entity/AxisAlignedBB";
-                        return true;
-                    }
-                }
-
-                if (isZip || ext == ".jar" || ext == ".zip" || ext == ".dll" || ext == ".disabled" || ext == ".bak")
-                {
-                    bool hasLPng = false;
-                    bool hasMcmodInfo = false;
-                    bool hasNetJavaS = false;
-                    bool hasNetJavaF = false;
-                    bool hasClassFiles = false;
-                    bool hasManifest = false;
-                    bool hasDoomsdayName = false;
-
-                    try
-                    {
-                        using (var archive = ZipFile.OpenRead(file.FullName))
-                        {
-                            foreach (var entry in archive.Entries)
-                            {
-                                string eName = entry.FullName.ToLower().Replace('\\', '/');
-
-                                if (eName.EndsWith(".class"))
-                                    hasClassFiles = true;
-
-                                if (eName.EndsWith("manifest.mf"))
-                                    hasManifest = true;
-
-                                if (eName.Contains("doomsday") || eName.Contains("doomday"))
-                                    hasDoomsdayName = true;
-
-                                if (eName.EndsWith("l.png") || eName == "l.png")
-                                    hasLPng = true;
-
-                                if (eName.EndsWith("mcmod.info") || eName == "mcmod.info")
-                                    hasMcmodInfo = true;
-
-                                if (eName.Contains("net/java/s.class") || (eName.Contains("net/java") && eName.EndsWith("/s.class")))
-                                    hasNetJavaS = true;
-
-                                if (eName.Contains("net/java/f.class") || (eName.Contains("net/java") && eName.EndsWith("/f.class")))
-                                    hasNetJavaF = true;
-                            }
-                        }
-
-                        if (hasLPng && hasMcmodInfo)
-                        {
-                            reason = isDllDisguised
-                                ? "Doomsday, замаскированный под .dll (l.png + mcmod.info)"
-                                : "сигнатура Doomsday (l.png + mcmod.info)";
-                            return true;
-                        }
-
-                        if (hasNetJavaS && hasNetJavaF)
-                        {
-                            reason = isDllDisguised
-                                ? "Doomsday, замаскированный под .dll (net/java/s.class + net/java/f.class)"
-                                : "сигнатура Doomsday (net/java/s.class + net/java/f.class)";
-                            return true;
-                        }
-
-                        if (hasDoomsdayName)
-                        {
-                            reason = isDllDisguised
-                                ? "Doomsday, замаскированный под .dll (внутренние пути doomsday)"
-                                : "сигнатура Doomsday (внутренние пути doomsday)";
-                            return true;
-                        }
-
-                        if (isDllDisguised && (hasClassFiles || hasManifest))
-                        {
-                            reason = "JAR-чит, замаскированный под .dll (PK-архив с байткодом Java для запуска через java -jar)";
-                            return true;
-                        }
-                    }
-                    catch { }
-
-                    byte[] zipHead = new byte[Math.Min((int)len, 1048576)];
-                    using (var fs = file.OpenRead())
-                    {
-                        fs.Read(zipHead, 0, zipHead.Length);
-                    }
-                    string headUtf8 = Encoding.UTF8.GetString(zipHead);
-                    if (headUtf8.Contains("net/java/s.class") && headUtf8.Contains("net/java/f.class"))
-                    {
-                        reason = isDllDisguised
-                            ? "Doomsday, замаскированный под .dll (net/java/s.class, f.class в байткоде)"
-                            : "сигнатура Doomsday (net/java/s.class, f.class в байткоде)";
-                        return true;
-                    }
-
-                    if (isDllDisguised && (headUtf8.Contains("net/java/s.class") || headUtf8.Contains("net/java/f.class") || headUtf8.Contains("doomsday") || headUtf8.Contains("doomday")))
-                    {
-                        reason = "Doomsday, замаскированный под .dll (байткод Doomsday)";
-                        return true;
-                    }
-                }
-            }
-            catch { }
-
-            return false;
+            return CheckDoomsday.CheckFile(file, out reason);
         }
 
         private static string DecodeSig(string b64)
@@ -751,7 +852,6 @@ namespace AngelMineChecker
             DecodeSig("NjdjZnVlZ3UwcDhybQ=="),
             DecodeSig("QVJST1dfUklHSFRaT05UQUw="),
             DecodeSig("RFJPUERPV05fU1VDQ0VTUw=="),
-            DecodeSig("Q0hFVlJPTl9SSUdIVA=="),
             DecodeSig("dG9vbHRpcF9hcnJvd191cA=="),
             DecodeSig("TjFZMEc2emZ6MEVTSm9DSQ=="),
             DecodeSig("YXJTQnFCUWZiVW5GUFRHZQ=="),
@@ -763,6 +863,12 @@ namespace AngelMineChecker
             foundSig = "";
             if (file == null || !file.Exists) return false;
             if (IsCheckerOrSelf(file.FullName)) return false;
+
+            string nameLower = file.Name.ToLower();
+            string ext = file.Extension.ToLower();
+            if (nameLower.StartsWith("+~jf") || ext == ".ttf" || ext == ".otf" || ext == ".woff" || ext == ".woff2")
+                return false;
+
             try
             {
                 long len = file.Length;
@@ -772,6 +878,14 @@ namespace AngelMineChecker
                 {
                     byte[] buf = new byte[Math.Min((int)len, 4 * 1024 * 1024)];
                     int read = fs.Read(buf, 0, buf.Length);
+                    if (read >= 4)
+                    {
+                        if ((buf[0] == 0 && buf[1] == 1 && buf[2] == 0 && buf[3] == 0) ||
+                            (buf[0] == 'O' && buf[1] == 'T' && buf[2] == 'T' && buf[3] == 'O') ||
+                            (buf[0] == 'w' && buf[1] == 'O' && buf[2] == 'F' && buf[3] == 'F'))
+                            return false;
+                    }
+
                     string ascii = Encoding.ASCII.GetString(buf, 0, read);
                     string utf8 = Encoding.UTF8.GetString(buf, 0, read);
                     string unicode = Encoding.Unicode.GetString(buf, 0, read - (read % 2));
@@ -872,9 +986,6 @@ namespace AngelMineChecker
                     {
                         if (fileName.Contains(kw))
                         {
-                            if (kw == "impact" && (fileName.Contains("genshin") || fileName.Contains("hoyoverse") || fileName.Contains("mihoyo") || fileName.Contains("hoyoplay")))
-                                continue;
-
                             hasCheatKw = true;
                             break;
                         }
@@ -930,6 +1041,12 @@ namespace AngelMineChecker
                     bool hasObfuscation = false;
                     var detectedRules = new HashSet<ForbiddenModRule>();
 
+                    bool isWhitelistedHitboxMod = jarNameLower.Contains("botania") || jarNameLower.Contains("pehkui") ||
+                                                  jarNameLower.Contains("origins") || jarNameLower.Contains("artemislib") ||
+                                                  jarNameLower.Contains("identity") || jarNameLower.Contains("morph") ||
+                                                  jarNameLower.Contains("create") || jarNameLower.Contains("chisel") ||
+                                                  jarNameLower.Contains("supplementaries") || jarNameLower.Contains("alexsmobs");
+
                     foreach (var rule in ForbiddenModRules)
                     {
                         foreach (var kw in rule.Keywords)
@@ -938,7 +1055,7 @@ namespace AngelMineChecker
                             {
                                 if (rule.Category == "hitbox")
                                 {
-                                    hasHitboxExpand = true;
+                                    if (!isWhitelistedHitboxMod) hasHitboxExpand = true;
                                 }
                                 else
                                 {
@@ -973,7 +1090,12 @@ namespace AngelMineChecker
                                                     entryName.Contains("/integration/") || entryName.Contains("/integrations/") ||
                                                     entryName.Contains("/plugin/") || entryName.Contains("/plugins/") ||
                                                     entryName.Contains("/mixin/compat/") || entryName.Contains("/mixins/compat/") ||
-                                                    simpleName.Contains("compat") || simpleName.Contains("integration");
+                                                    entryName.Contains("/patch/") || entryName.Contains("/patches/") ||
+                                                    entryName.Contains("/addon/") || entryName.Contains("/addons/") ||
+                                                    entryName.Contains("hud") || entryName.Contains("leak") ||
+                                                    simpleName.Contains("compat") || simpleName.Contains("integration") ||
+                                                    simpleName.Contains("patch") || simpleName.Contains("addon") ||
+                                                    simpleName.Contains("plugin");
 
                                     if (!isCompat)
                                     {
@@ -1006,14 +1128,28 @@ namespace AngelMineChecker
                                         using (var reader = new StreamReader(stream))
                                         {
                                             string manifest = reader.ReadToEnd();
+                                            string manifestClean = manifest;
+
+                                            if (entryName.EndsWith("mods.toml", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                int depIdx = manifest.IndexOf("[[dependencies", StringComparison.OrdinalIgnoreCase);
+                                                if (depIdx > 0) manifestClean = manifest.Substring(0, depIdx);
+                                            }
+                                            else if (entryName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                int depIdx = manifest.IndexOf("\"depends\"", StringComparison.OrdinalIgnoreCase);
+                                                if (depIdx < 0) depIdx = manifest.IndexOf("\"suggests\"", StringComparison.OrdinalIgnoreCase);
+                                                if (depIdx > 0) manifestClean = manifest.Substring(0, depIdx);
+                                            }
+
                                             var modIdentifiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                                            var idMatches = Regex.Matches(manifest, @"(?:""(?:id|modid)""|modId)\s*[:=]\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                                            var idMatches = Regex.Matches(manifestClean, @"(?:""(?:id|modid)""|modId)\s*[:=]\s*""([^""]+)""", RegexOptions.IgnoreCase);
                                             foreach (Match m in idMatches)
                                             {
                                                 if (m.Groups.Count > 1) modIdentifiers.Add(m.Groups[1].Value.ToLower());
                                             }
-                                            var nameMatches = Regex.Matches(manifest, @"(?:""(?:name|displayName)""|displayName)\s*[:=]\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                                            var nameMatches = Regex.Matches(manifestClean, @"(?:""(?:name|displayName)""|displayName)\s*[:=]\s*""([^""]+)""", RegexOptions.IgnoreCase);
                                             foreach (Match m in nameMatches)
                                             {
                                                 if (m.Groups.Count > 1) modIdentifiers.Add(m.Groups[1].Value.ToLower());
@@ -1027,7 +1163,7 @@ namespace AngelMineChecker
                                                     {
                                                         if (rule.Category == "hitbox")
                                                         {
-                                                            hasHitboxExpand = true;
+                                                            if (!isWhitelistedHitboxMod) hasHitboxExpand = true;
                                                         }
                                                         else
                                                         {
@@ -1062,12 +1198,12 @@ namespace AngelMineChecker
                                     hasLoader = true;
                                 }
 
-                                if (entryName.Contains("bushroot") || entryName.Contains("/hb/") || entryName.StartsWith("hb/"))
+                                if (!isWhitelistedHitboxMod && (entryName.Contains("bushroot") || entryName.Contains("/hb/") || entryName.StartsWith("hb/")))
                                 {
                                     hasHitboxExpand = true;
                                 }
 
-                                if (entryName.Contains("hitbox") || entryName.Contains("reach") || jarNameLower.Contains("hitbox"))
+                                if (!isWhitelistedHitboxMod && (entryName.Contains("hitbox") || entryName.Contains("reach") || jarNameLower.Contains("hitbox")))
                                 {
                                     if (entryName.EndsWith(".class"))
                                     {
@@ -1115,7 +1251,7 @@ namespace AngelMineChecker
                     }
                     catch { }
 
-                    if (hasHitboxExpand)
+                    if (hasHitboxExpand && !isWhitelistedHitboxMod)
                     {
                         issueLogs.Add($"Найден мод на расширения хитбокс - {jarName}");
                         modBanReasons.Add($"Найден мод на расширения хитбокс - {jarName}");
@@ -1201,11 +1337,6 @@ namespace AngelMineChecker
                 {
                     if (lower.Contains(kw))
                     {
-                        if (kw == "impact" && (lower.Contains("genshin") || lower.Contains("hoyoverse") || lower.Contains("mihoyo") || lower.Contains("hoyoplay")))
-                        {
-                            continue;
-                        }
-
                         if (!regMatches.ContainsKey(kw))
                         {
                             regMatches[kw] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1467,9 +1598,6 @@ namespace AngelMineChecker
                                     {
                                         if (modCandidate.Contains(kw))
                                         {
-                                            if (kw == "impact" && (modCandidate.Contains("genshin") || modCandidate.Contains("hoyoverse") || modCandidate.Contains("mihoyo") || modCandidate.Contains("hoyoplay")))
-                                                continue;
-
                                             string report = $"Найден чит в логах: {modCandidate}";
                                             if (detectedLogCheats.Add(report))
                                             {
@@ -1599,7 +1727,6 @@ namespace AngelMineChecker
             if (modsDirs == null || modsDirs.Count == 0) return;
 
             DateTime? mcLaunchTime = null;
-            bool isGameCurrentlyRunning = false;
 
             try
             {
@@ -1608,13 +1735,12 @@ namespace AngelMineChecker
                 {
                     var mainProc = procs.OrderByDescending(p =>
                     {
-                        try { return p.StartTime; } catch { return DateTime.MinValue; }
+                        try { return p.WorkingSet64; } catch { return 0; }
                     }).First();
 
                     try
                     {
                         mcLaunchTime = mainProc.StartTime;
-                        isGameCurrentlyRunning = true;
                     }
                     catch { }
                 }
@@ -1673,62 +1799,6 @@ namespace AngelMineChecker
 
             DateTime launch = mcLaunchTime.Value;
             var deletedModNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            if (logsDirs != null)
-            {
-                foreach (var lDir in logsDirs)
-                {
-                    string latestLog = Path.Combine(lDir, "latest.log");
-                    if (!File.Exists(latestLog)) continue;
-
-                    try
-                    {
-                        using (var fs = new FileStream(latestLog, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                        using (var reader = new StreamReader(fs, Encoding.UTF8))
-                        {
-                            string line;
-                            while ((line = reader.ReadLine()) != null)
-                            {
-                                if (line.IndexOf("libraries", StringComparison.OrdinalIgnoreCase) >= 0)
-                                    continue;
-
-                                var matches = Regex.Matches(line, @"(?:[/\\]mods[/\\]|^mods[/\\])([a-zA-Z0-9_\.\-\+ ]+\.jar)", RegexOptions.IgnoreCase);
-                                foreach (Match match in matches)
-                                {
-                                    string jarName = match.Groups[1].Value.Trim();
-                                    string jarLower = jarName.ToLower();
-
-                                    if (jarLower == "minecraft.jar" || jarLower == "client.jar" || jarLower == "server.jar" ||
-                                        jarLower.Contains("mixin") || jarLower.Contains("authlib") || jarLower.Contains("intermediary") ||
-                                        jarLower.Contains("sponge") || jarLower.Contains("lwjgl") || jarLower.Contains("fabric-loader") ||
-                                        jarLower.Contains("forge") || jarLower.Contains("neoforge") || jarLower.Contains("log4j") ||
-                                        jarLower.Contains("asm") || jarLower.Contains("guava") || jarLower.Contains("commons-") ||
-                                        jarLower.Contains("netty") || jarLower.Contains("slf4j"))
-                                    {
-                                        continue;
-                                    }
-
-                                    bool existsInMods = false;
-                                    foreach (var mDir in modsDirs)
-                                    {
-                                        if (File.Exists(Path.Combine(mDir, jarName)))
-                                        {
-                                            existsInMods = true;
-                                            break;
-                                        }
-                                    }
-
-                                    if (!existsInMods)
-                                    {
-                                        deletedModNames.Add(jarName);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-            }
 
             try
             {
@@ -1791,27 +1861,6 @@ namespace AngelMineChecker
             }
             catch { }
 
-            if (isGameCurrentlyRunning && deletedModNames.Count == 0)
-            {
-                foreach (var mDir in modsDirs)
-                {
-                    try
-                    {
-                        var di = new DirectoryInfo(mDir);
-                        if (di.LastWriteTime > launch.AddSeconds(15))
-                        {
-                            var currentFiles = di.GetFiles("*.jar");
-                            bool hasNewFile = currentFiles.Any(f => f.CreationTime > launch.AddSeconds(10));
-                            if (!hasNewFile)
-                            {
-                                deletedModNames.Add("(файл из папки mods)");
-                            }
-                        }
-                    }
-                    catch { }
-                }
-            }
-
             foreach (var mod in deletedModNames)
             {
                 log($"После запуска майкрафта , был удален мод {mod}");
@@ -1822,144 +1871,106 @@ namespace AngelMineChecker
         internal static int CheckRecentDownloads(Action<string> log, List<string> banReasons)
         {
             int warnings = 0;
-            string downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-            if (!Directory.Exists(downloads)) return 0;
+            var downloadDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string userDl = Path.Combine(userProfile, "Downloads");
+            if (Directory.Exists(userDl)) downloadDirs.Add(userDl);
+            string userDlRu = Path.Combine(userProfile, "Загрузки");
+            if (Directory.Exists(userDlRu)) downloadDirs.Add(userDlRu);
 
             try
             {
-                var files = Directory.GetFiles(downloads);
-                foreach (var f in files)
+                foreach (var drive in DriveInfo.GetDrives())
                 {
-                    if (IsCheckerOrSelf(f)) continue;
-                    string name = Path.GetFileName(f).ToLower();
-
-                    bool matched = false;
-                    foreach (var kw in CheatKeywords)
+                    if (drive.IsReady && (drive.DriveType == DriveType.Fixed || drive.DriveType == DriveType.Removable))
                     {
-                        if (name.Contains(kw))
-                        {
-                            if (kw == "impact" && (name.Contains("genshin") || name.Contains("hoyoverse") || name.Contains("mihoyo") || name.Contains("hoyoplay")))
-                                continue;
-
-                            log($"Найден в загрузках: {Path.GetFileName(f)}");
-                            banReasons.Add($"Найден в загрузках чит - {Path.GetFileName(f)} ({f})");
-                            warnings++;
-                            matched = true;
-                            break;
-                        }
+                        string r = drive.RootDirectory.FullName;
+                        string dlEn = Path.Combine(r, "Downloads");
+                        if (Directory.Exists(dlEn)) downloadDirs.Add(dlEn);
+                        string dlRu = Path.Combine(r, "Загрузки");
+                        if (Directory.Exists(dlRu)) downloadDirs.Add(dlRu);
                     }
+                }
+            }
+            catch { }
 
-                    if (!matched)
+            foreach (var downloads in downloadDirs)
+            {
+                try
+                {
+                    var files = Directory.GetFiles(downloads);
+                    foreach (var f in files)
                     {
-                        foreach (var rule in ForbiddenModRules)
+                        if (IsCheckerOrSelf(f)) continue;
+                        string name = Path.GetFileName(f).ToLower();
+
+                        bool matched = false;
+                        foreach (var kw in CheatKeywords)
                         {
-                            if (rule.Keywords.Any(kw => name.Contains(kw)))
+                            if (name.Contains(kw))
                             {
-                                log($"Найден в загрузках: {Path.GetFileName(f)} ({rule.SummaryTag})");
-                                banReasons.Add($"Найден в загрузках запрещенный софт - {Path.GetFileName(f)} ({rule.SummaryTag})");
+                                log($"Найден в загрузках: {Path.GetFileName(f)}");
+                                banReasons.Add($"Найден в загрузках чит - {Path.GetFileName(f)} ({f})");
                                 warnings++;
                                 matched = true;
                                 break;
                             }
                         }
-                    }
 
-                    if (!matched && (name.EndsWith(".jar") || name.EndsWith(".zip") || name.EndsWith(".dll") || name.EndsWith(".disabled") || name.EndsWith(".bak")))
-                    {
-                        try
+                        if (!matched)
                         {
-                            if (CheckDoomsdayJar(new FileInfo(f), out string dReason))
+                            foreach (var rule in ForbiddenModRules)
                             {
-                                log($"Найден в загрузках чит Doomsday: {Path.GetFileName(f)} ({dReason})");
-                                banReasons.Add($"Найден Doomsday - {f} ({dReason})");
-                                warnings++;
-                                matched = true;
-                            }
-                        }
-                        catch { }
-                    }
-
-                    if (!matched)
-                    {
-                        try
-                        {
-                            var fi = new FileInfo(f);
-                            if (fi.Length > 0 && fi.Length <= 35 * 1024 * 1024)
-                            {
-                                if (CheckSystemDlcInFile(fi, out string sSig))
+                                if (rule.Keywords.Any(kw => name.Contains(kw)))
                                 {
-                                    log($"Найден в загрузках чит SystemDLC: {Path.GetFileName(f)} (сигнатура {sSig})");
-                                    banReasons.Add($"Найден SystemDLC - {f} ({sSig})");
+                                    log($"Найден в загрузках: {Path.GetFileName(f)} ({rule.SummaryTag})");
+                                    banReasons.Add($"Найден в загрузках запрещенный софт - {Path.GetFileName(f)} ({rule.SummaryTag})");
                                     warnings++;
+                                    matched = true;
+                                    break;
                                 }
                             }
                         }
-                        catch { }
-                    }
-                }
-            }
-            catch { }
 
-            return warnings;
-        }
-
-        public static int CheckActiveJavaAndCheatProcesses(Action<string> log, List<string> banReasons)
-        {
-            int threats = 0;
-            try
-            {
-                using (var searcher = new ManagementObjectSearcher("SELECT ProcessId, Name, CommandLine FROM Win32_Process"))
-                using (var objects = searcher.Get())
-                {
-                    foreach (ManagementObject obj in objects)
-                    {
-                        try
+                        if (!matched && (name.EndsWith(".jar") || name.EndsWith(".zip") || name.EndsWith(".disabled")))
                         {
-                            string pName = (obj["Name"] as string ?? "").ToLower();
-                            string cmd = obj["CommandLine"] as string ?? "";
-                            int pid = Convert.ToInt32(obj["ProcessId"]);
-                            if (string.IsNullOrEmpty(cmd)) continue;
-
-                            string cmdLower = cmd.ToLower();
-
-                            if (cmdLower.Contains("-jar") && cmdLower.Contains(".dll"))
+                            try
                             {
-                                log($"Найден активный процесс запуска JAR под видом DLL: {pName} (PID {pid}) -> {cmd}");
-                                banReasons.Add($"Запуск JAR под видом DLL (Doomsday) - {cmd}");
-                                threats++;
-                                continue;
-                            }
-
-                            if (cmdLower.Contains("doomsday") || cmdLower.Contains("doomday"))
-                            {
-                                log($"Найден активный процесс чита Doomsday: {pName} (PID {pid}) -> {cmd}");
-                                banReasons.Add($"Активный процесс Doomsday (PID {pid}) - {cmd}");
-                                threats++;
-                                continue;
-                            }
-
-                            if (pName == "java.exe")
-                            {
-                                foreach (var kw in CheatKeywords)
+                                if (CheckDoomsdayJar(new FileInfo(f), out string dReason))
                                 {
-                                    if (cmdLower.Contains(kw))
+                                    log($"Найден в загрузках чит Doomsday: {Path.GetFileName(f)} ({dReason})");
+                                    banReasons.Add($"Найден Doomsday - {f} ({dReason})");
+                                    warnings++;
+                                    matched = true;
+                                }
+                            }
+                            catch { }
+                        }
+
+                        if (!matched)
+                        {
+                            try
+                            {
+                                var fi = new FileInfo(f);
+                                if (fi.Length > 0 && fi.Length <= 35 * 1024 * 1024)
+                                {
+                                    if (CheckSystemDlcInFile(fi, out string sSig))
                                     {
-                                        if (kw == "impact" && (cmdLower.Contains("genshin") || cmdLower.Contains("hoyoverse"))) continue;
-                                        log($"Найден активный чит, запущенный через Java: {pName} (PID {pid}) -> {cmd}");
-                                        banReasons.Add($"Активный чит в Java - {cmd}");
-                                        threats++;
-                                        break;
+                                        log($"Найден в загрузках чит SystemDLC: {Path.GetFileName(f)} (сигнатура {sSig})");
+                                        banReasons.Add($"Найден SystemDLC - {f} ({sSig})");
+                                        warnings++;
                                     }
                                 }
                             }
+                            catch { }
                         }
-                        catch { }
                     }
                 }
+                catch { }
             }
-            catch { }
 
-            return threats;
+            return warnings;
         }
 
         internal static int CheckSuspiciousProcesses(Action<string> log, List<string> banReasons)
@@ -1976,9 +1987,6 @@ namespace AngelMineChecker
                         {
                             if (pName.Contains(kw) && pName != "angelminechecker")
                             {
-                                if (kw == "impact" && (pName.Contains("genshin") || pName.Contains("hoyoverse") || pName.Contains("mihoyo") || pName.Contains("hoyoplay")))
-                                    continue;
-
                                 log($"Найден активный процесс: {proc.ProcessName}.exe (PID: {proc.Id})");
                                 banReasons.Add($"Активный процесс: {proc.ProcessName}.exe (PID: {proc.Id})");
                                 threats++;
@@ -1990,8 +1998,6 @@ namespace AngelMineChecker
                 }
             }
             catch { }
-
-            threats += CheckActiveJavaAndCheatProcesses(log, banReasons);
 
             return threats;
         }

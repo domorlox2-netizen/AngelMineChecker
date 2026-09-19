@@ -1,4 +1,4 @@
-﻿## Visual Studio / MSBuild
+## Visual Studio / MSBuild
 [Bb]in/
 [Oo]bj/
 *.user
@@ -10,5 +10,6 @@
 ## Logs & Temp
 *.log
 *.tmp
+1.txt
 crash.log
 download_error.log

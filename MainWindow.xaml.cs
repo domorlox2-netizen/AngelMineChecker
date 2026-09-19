@@ -704,7 +704,8 @@ namespace AngelMineChecker
 
                 if (sfd.ShowDialog() == true)
                 {
-                    System.IO.File.WriteAllText(sfd.FileName, txtCheckLogs.Text, System.Text.Encoding.UTF8);
+                    string contentToSave = CheckDoomsday.EnrichSavedLog(txtCheckLogs.Text);
+                    System.IO.File.WriteAllText(sfd.FileName, contentToSave, System.Text.Encoding.UTF8);
                     AppendLog($"[Инфо] Лог успешно сохранен в файл: {sfd.FileName}");
                 }
             }

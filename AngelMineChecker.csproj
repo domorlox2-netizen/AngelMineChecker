@@ -87,6 +87,7 @@
     <Compile Include="QuickScanner.cs" />
     <Compile Include="DeepScanner.cs" />
     <Compile Include="AccountScanner.cs" />
+    <Compile Include="CheckDoomsday.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

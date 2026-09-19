@@ -63,15 +63,15 @@ namespace AngelMineChecker
         {
             public string Name { get; set; }
             public bool IsSystemDlc { get; set; }
-            public bool IsDoomsday { get; set; }
-            public byte[] AsciiBytesLower { get; set; }
+            public byte[] AsciiBytes { get; set; }
+            public byte[] UnicodeBytes { get; set; }
 
-            public SearchPattern(string name, bool isSystemDlc = false, bool isDoomsday = false)
+            public SearchPattern(string name, bool isSystemDlc = false)
             {
                 Name = name;
                 IsSystemDlc = isSystemDlc;
-                IsDoomsday = isDoomsday;
-                AsciiBytesLower = Encoding.ASCII.GetBytes(name.ToLowerInvariant());
+                AsciiBytes = Encoding.ASCII.GetBytes(name);
+                UnicodeBytes = Encoding.Unicode.GetBytes(name);
             }
         }
 
@@ -82,29 +82,16 @@ namespace AngelMineChecker
 
         private static readonly List<SearchPattern> PrecompiledMemoryPatterns = new List<SearchPattern>
         {
-            new SearchPattern("trigger bot"),
             new SearchPattern("triggerbot"),
-            new SearchPattern("trigger_bot"),
-            new SearchPattern("aim assist"),
             new SearchPattern("aimassist"),
-            new SearchPattern("aim_assist"),
-            new SearchPattern("auto clicker"),
-            new SearchPattern("autoclicker"),
-            new SearchPattern("fastplace"),
-            new SearchPattern("fast place"),
-            new SearchPattern("net/java/s.class", false, true),
-            new SearchPattern("net/java/f.class", false, true),
-            new SearchPattern("net/java/s", false, true),
-            new SearchPattern("net/java/f", false, true),
-            new SearchPattern("doomsday", false, true),
-            new SearchPattern("doomday", false, true),
             new SearchPattern("dear imgui"),
             new SearchPattern("imgui::createcontext"),
             new SearchPattern("imgui_impl_win32"),
+            new SearchPattern("doomsdayclient.xyz"),
+            new SearchPattern("doomsdayclient"),
             new SearchPattern(DecodeSig("NjdjZnVlZ3UwcDhybQ=="), true),
             new SearchPattern(DecodeSig("QVJST1dfUklHSFRaT05UQUw="), true),
             new SearchPattern(DecodeSig("RFJPUERPV05fU1VDQ0VTUw=="), true),
-            new SearchPattern(DecodeSig("Q0hFVlJPTl9SSUdIVA=="), true),
             new SearchPattern(DecodeSig("dG9vbHRpcF9hcnJvd191cA=="), true),
             new SearchPattern(DecodeSig("TjFZMEc2emZ6MEVTSm9DSQ=="), true),
             new SearchPattern(DecodeSig("YXJTQnFCUWZiVW5GUFRHZQ=="), true),
@@ -117,7 +104,7 @@ namespace AngelMineChecker
             "fontmanager.dll", "freetype.dll", "jimage.dll", "jsvml.dll", "sunmscapi.dll",
             "management.dll", "management_ext.dll", "javajpeg.dll", "lcms.dll", "jawt.dll",
             "extnet.dll", "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "ucrtbase.dll",
-            "instrument.dll", "prefs.dll", "w2k_lsa_auth.dll", "sspi_bridge.dll"
+            "attach.dll", "instrument.dll", "prefs.dll", "w2k_lsa_auth.dll", "sspi_bridge.dll"
         };
 
         public static async Task RunAsync(int? targetPid, Action<string> log)
@@ -185,7 +172,7 @@ namespace AngelMineChecker
             CheckConsoleHostHistory(log, banReasons);
             await Task.Delay(150);
 
-            int resolvedPid = ResolveTargetPid(targetPid);
+            int resolvedPid = ResolveTargetPid(targetPid, log);
             if (resolvedPid > 0)
             {
                 log($"Анализ памяти процесса PID {resolvedPid} (строки triggerbot, aimassist, imgui, сигнатуры SystemDLC)");
@@ -202,6 +189,8 @@ namespace AngelMineChecker
             {
                 log("Процесс javaw.exe не запущен (пропуск анализа памяти и DLL инжектов)");
             }
+
+            await CheckDoomsday.RunDoomsdayCheckAsync(log, banReasons, resolvedPid > 0 ? (int?)resolvedPid : targetPid);
 
             log("");
             log("");
@@ -507,7 +496,6 @@ namespace AngelMineChecker
                                                 {
                                                     if (lower.Contains(kw))
                                                     {
-                                                        if (kw == "impact" && (lower.Contains("genshin") || lower.Contains("hoyoverse"))) continue;
                                                         seen.Add(text);
                                                         log($"Найден файл в RecentDocs: {text}");
                                                         banReasons.Add($"Найден файл чита в RecentDocs - {text}");
@@ -552,7 +540,6 @@ namespace AngelMineChecker
                                                 {
                                                     if (lower.Contains(kw))
                                                     {
-                                                        if (kw == "impact" && (lower.Contains("genshin") || lower.Contains("hoyoverse"))) continue;
                                                         seen.Add(text);
                                                         log($"Найден файл в OpenSavePidlMRU: {text}");
                                                         banReasons.Add($"Найден файл чита в OpenSavePidlMRU - {text}");
@@ -585,7 +572,6 @@ namespace AngelMineChecker
                                 {
                                     if (lower.Contains(kw))
                                     {
-                                        if (kw == "impact" && (lower.Contains("genshin") || lower.Contains("hoyoverse"))) continue;
                                         seen.Add(valName);
                                         log($"Найден запуск софта в AppSwitched: {valName}");
                                         banReasons.Add($"Найден запуск софта в AppSwitched - {valName}");
@@ -620,7 +606,6 @@ namespace AngelMineChecker
                                         {
                                             if (lower.Contains(kw))
                                             {
-                                                if (kw == "impact" && (lower.Contains("genshin") || lower.Contains("hoyoverse"))) continue;
                                                 seen.Add(decoded);
                                                 log($"Найден запуск софта в UserAssist: {decoded}");
                                                 banReasons.Add($"Найден запуск софта в UserAssist - {decoded}");
@@ -663,7 +648,6 @@ namespace AngelMineChecker
                                         {
                                             if (lower.Contains(kw))
                                             {
-                                                if (kw == "impact" && (lower.Contains("genshin") || lower.Contains("hoyoverse"))) continue;
                                                 seen.Add(valName);
                                                 log($"Найден запуск в BAM: {valName}");
                                                 banReasons.Add($"Найден запуск софта в BAM - {valName}");
@@ -747,16 +731,6 @@ namespace AngelMineChecker
                                         banReasons.Add($"Найден SystemDLC - {f} (сигнатура: {foundSig})");
                                     }
                                 }
-
-                                if (QuickScanner.CheckDoomsdayJar(fi, out string dReason))
-                                {
-                                    if (!seen.Contains(f))
-                                    {
-                                        seen.Add(f);
-                                        log($"Найден чит Doomsday: {Path.GetFileName(f)} ({f}) [{dReason}]");
-                                        banReasons.Add($"Найден Doomsday - {f} ({dReason})");
-                                    }
-                                }
                             }
                         }
                         catch { }
@@ -808,37 +782,14 @@ namespace AngelMineChecker
                         string lower = trimmed.ToLower();
 
                         bool found = false;
-
-                        if ((lower.Contains("java") || lower.Contains("javaw")) && lower.Contains("-jar") && lower.Contains(".dll"))
+                        foreach (var sc in suspiciousCmds)
                         {
-                            log($"Найден запуск JAR под видом DLL в истории PowerShell: {trimmed}");
-                            banReasons.Add($"Запуск JAR под видом DLL в PowerShell (Doomsday) - {trimmed}");
-                            found = true;
-                        }
-                        else if (lower.Contains("-jar") && lower.Contains(".dll"))
-                        {
-                            log($"Найден запуск JAR под видом DLL в истории PowerShell: {trimmed}");
-                            banReasons.Add($"Запуск JAR под видом DLL в PowerShell - {trimmed}");
-                            found = true;
-                        }
-                        else if (lower.Contains("doomsday") || lower.Contains("doomday"))
-                        {
-                            log($"Найден след запуска Doomsday в истории PowerShell: {trimmed}");
-                            banReasons.Add($"След запуска Doomsday в PowerShell - {trimmed}");
-                            found = true;
-                        }
-
-                        if (!found)
-                        {
-                            foreach (var sc in suspiciousCmds)
+                            if (lower.Contains(sc))
                             {
-                                if (lower.Contains(sc))
-                                {
-                                    log($"Найден след в истории командной строки (PSReadLine): {trimmed}");
-                                    banReasons.Add($"След в истории PowerShell - {trimmed}");
-                                    found = true;
-                                    break;
-                                }
+                                log($"Найден след в истории командной строки (PSReadLine): {trimmed}");
+                                banReasons.Add($"След в истории PowerShell - {trimmed}");
+                                found = true;
+                                break;
                             }
                         }
 
@@ -860,25 +811,137 @@ namespace AngelMineChecker
             catch { }
         }
 
-        private static int ResolveTargetPid(int? preferredPid)
+        private static int ResolveTargetPid(int? preferredPid, Action<string> log = null)
         {
             if (preferredPid.HasValue && preferredPid.Value > 0)
             {
                 try
                 {
                     var p = Process.GetProcessById(preferredPid.Value);
-                    if (!p.HasExited) return preferredPid.Value;
+                    if (!p.HasExited)
+                    {
+                        if (log != null)
+                        {
+                            long memMb = p.WorkingSet64 / (1024 * 1024);
+                            log($"Выбран указанный процесс Minecraft: PID {p.Id} ({p.ProcessName}, {memMb} МБ, \"{p.MainWindowTitle}\")");
+                        }
+                        return preferredPid.Value;
+                    }
                 }
                 catch { }
             }
 
-            var javaProcs = Process.GetProcessesByName("javaw");
-            if (javaProcs.Length > 0) return javaProcs[0].Id;
+            var candidates = new List<ProcessCandidate>();
 
-            var javaFallback = Process.GetProcessesByName("java");
-            if (javaFallback.Length > 0) return javaFallback[0].Id;
+            var cmdMap = new Dictionary<int, string>();
+            try
+            {
+                using (var searcher = new ManagementObjectSearcher("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'javaw.exe' OR Name = 'java.exe'"))
+                using (var objects = searcher.Get())
+                {
+                    foreach (ManagementObject obj in objects)
+                    {
+                        try
+                        {
+                            int pid = Convert.ToInt32(obj["ProcessId"]);
+                            string cmd = obj["CommandLine"] as string ?? "";
+                            cmdMap[pid] = cmd;
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+
+            var procs = Process.GetProcessesByName("javaw").Concat(Process.GetProcessesByName("java"));
+            foreach (var p in procs)
+            {
+                try
+                {
+                    if (p.HasExited) continue;
+
+                    string title = "";
+                    try { title = p.MainWindowTitle ?? ""; } catch { }
+
+                    string titleLower = title.ToLower();
+                    long memBytes = 0;
+                    try { memBytes = p.WorkingSet64; } catch { }
+
+                    cmdMap.TryGetValue(p.Id, out string cmdLine);
+                    cmdLine = cmdLine ?? "";
+                    string cmdLower = cmdLine.ToLower();
+
+                    int score = 0;
+
+                    if (cmdLower.Contains("org.tlauncher") || cmdLower.Contains("ru.turikhay") ||
+                        cmdLower.Contains("tlauncher.jar") || cmdLower.Contains("launcher.jar") ||
+                        cmdLower.Contains("tl.exe") || titleLower.Contains("tlauncher") ||
+                        titleLower.Contains("legacy launcher") || titleLower.Contains("лаунчер"))
+                    {
+                        score -= 200;
+                    }
+
+                    if (cmdLower.Contains("net.minecraft.client.main.main") ||
+                        cmdLower.Contains("knotclient") ||
+                        cmdLower.Contains("fmlclientlaunchhandler") ||
+                        cmdLower.Contains("bootstraplauncher") ||
+                        cmdLower.Contains("net.minecraft.launchwrapper.launch"))
+                    {
+                        score += 300;
+                    }
+
+                    if (cmdLower.Contains("--gamedir") || cmdLower.Contains("--assetsdir"))
+                    {
+                        score += 150;
+                    }
+
+                    if (titleLower.Contains("minecraft") ||
+                        titleLower.Contains("1.21") || titleLower.Contains("1.20") ||
+                        titleLower.Contains("1.19") || titleLower.Contains("1.18") ||
+                        titleLower.Contains("1.16") || titleLower.Contains("1.12") ||
+                        titleLower.Contains("1.8") || titleLower.Contains("lunar") ||
+                        titleLower.Contains("badlion") || titleLower.Contains("feather"))
+                    {
+                        score += 150;
+                    }
+
+                    long memMb = memBytes / (1024 * 1024);
+                    if (memMb >= 1000) score += 100;
+                    if (memMb >= 1500) score += 100;
+                    if (memMb <= 350) score -= 50;
+
+                    score += (int)Math.Min(100, memMb / 20);
+
+                    candidates.Add(new ProcessCandidate
+                    {
+                        Process = p,
+                        Score = score,
+                        Title = title,
+                        MemMb = memMb
+                    });
+                }
+                catch { }
+            }
+
+            if (candidates.Count > 0)
+            {
+                var best = candidates.OrderByDescending(c => c.Score).ThenByDescending(c => c.MemMb).First();
+                if (log != null)
+                {
+                    log($"Определен процесс Minecraft: {best.Process.ProcessName}.exe (PID {best.Process.Id}, память {best.MemMb} МБ, окно: \"{best.Title}\")");
+                }
+                return best.Process.Id;
+            }
 
             return -1;
+        }
+
+        private class ProcessCandidate
+        {
+            public Process Process { get; set; }
+            public int Score { get; set; }
+            public string Title { get; set; }
+            public long MemMb { get; set; }
         }
 
         private static async Task ScanProcessMemoryAsync(int pid, Action<string> log, List<string> banReasons)
@@ -908,7 +971,7 @@ namespace AngelMineChecker
 
                     while (VirtualQueryEx(hProcess, address, out mbi, (uint)structSize) == structSize)
                     {
-                        if (sw.ElapsedMilliseconds > 8000 || scannedRegions > 1200)
+                        if (sw.ElapsedMilliseconds > 3000 || scannedRegions > 300)
                             break;
 
                         if (mbi.State == MEM_COMMIT &&
@@ -917,7 +980,7 @@ namespace AngelMineChecker
                             ((mbi.Protect & PAGE_READWRITE) != 0 || (mbi.Protect & PAGE_EXECUTE_READWRITE) != 0))
                         {
                             long regionBytes = mbi.RegionSize.ToInt64();
-                            long bytesToReadTotal = Math.Min(regionBytes, 8388608);
+                            long bytesToReadTotal = Math.Min(regionBytes, 2097152);
                             long offset = 0;
 
                             while (offset < bytesToReadTotal)
@@ -933,23 +996,18 @@ namespace AngelMineChecker
                                     {
                                         if (!foundSignatures.Contains(pat.Name))
                                         {
-                                            if (ContainsAsciiCaseInsensitive(buffer, readLen, pat.AsciiBytesLower) ||
-                                                ContainsUnicodeCaseInsensitive(buffer, readLen, pat.AsciiBytesLower))
+                                            if (ContainsBytePattern(buffer, readLen, pat.AsciiBytes) ||
+                                                ContainsBytePattern(buffer, readLen, pat.UnicodeBytes))
                                             {
                                                 foundSignatures.Add(pat.Name);
-                                                if (pat.IsDoomsday)
-                                                {
-                                                    log($"Найден след Doomsday в памяти процесса PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
-                                                    banReasons.Add($"Найден след инжекта Doomsday в памяти процесса (PID {pid}) - {pat.Name}");
-                                                }
-                                                else if (pat.IsSystemDlc)
+                                                if (pat.IsSystemDlc)
                                                 {
                                                     log($"Найден след SystemDLC в памяти процесса PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
                                                     banReasons.Add($"Найден след SystemDLC в памяти процесса (PID {pid}) - {pat.Name}");
                                                 }
                                                 else
                                                 {
-                                                    log($"Найдена сигнатура чита в памяти PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
+                                                    log($"Найдена сигнатура в памяти PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
                                                     banReasons.Add($"Найдена сигнатура чита в памяти (PID {pid}) - {pat.Name}");
                                                 }
                                             }
@@ -982,66 +1040,25 @@ namespace AngelMineChecker
             });
         }
 
-        private static bool ContainsAsciiCaseInsensitive(byte[] buffer, int length, byte[] lowerPattern)
+        private static bool ContainsBytePattern(byte[] buffer, int length, byte[] pattern)
         {
-            if (lowerPattern == null || lowerPattern.Length == 0 || length < lowerPattern.Length) return false;
-            byte first = lowerPattern[0];
-            int max = length - lowerPattern.Length;
+            if (pattern == null || pattern.Length == 0 || length < pattern.Length) return false;
+            byte first = pattern[0];
+            int max = length - pattern.Length;
             for (int i = 0; i <= max; i++)
             {
-                byte b = buffer[i];
-                if (b >= 65 && b <= 90) b = (byte)(b + 32);
-                if (b == first)
+                if (buffer[i] == first)
                 {
                     bool match = true;
-                    for (int j = 1; j < lowerPattern.Length; j++)
+                    for (int j = 1; j < pattern.Length; j++)
                     {
-                        byte bj = buffer[i + j];
-                        if (bj >= 65 && bj <= 90) bj = (byte)(bj + 32);
-                        if (bj != lowerPattern[j])
+                        if (buffer[i + j] != pattern[j])
                         {
                             match = false;
                             break;
                         }
                     }
                     if (match) return true;
-                }
-            }
-            return false;
-        }
-
-        private static bool ContainsUnicodeCaseInsensitive(byte[] buffer, int length, byte[] lowerPattern)
-        {
-            if (lowerPattern == null || lowerPattern.Length == 0) return false;
-            int patLen = lowerPattern.Length;
-            int unicodeBytesLen = patLen * 2;
-            if (length < unicodeBytesLen) return false;
-
-            byte first = lowerPattern[0];
-            int max = length - unicodeBytesLen;
-            for (int i = 0; i <= max; i++)
-            {
-                if (i + 1 < length && buffer[i + 1] == 0)
-                {
-                    byte b = buffer[i];
-                    if (b >= 65 && b <= 90) b = (byte)(b + 32);
-                    if (b == first)
-                    {
-                        bool match = true;
-                        for (int j = 1; j < patLen; j++)
-                        {
-                            int idx = i + j * 2;
-                            if (idx + 1 >= length || buffer[idx + 1] != 0) { match = false; break; }
-                            byte bj = buffer[idx];
-                            if (bj >= 65 && bj <= 90) bj = (byte)(bj + 32);
-                            if (bj != lowerPattern[j])
-                            {
-                                match = false;
-                                break;
-                            }
-                        }
-                        if (match) return true;
-                    }
                 }
             }
             return false;
@@ -1086,23 +1103,7 @@ namespace AngelMineChecker
                         string modName = sbName.ToString();
                         string modNameLower = modName.ToLower();
 
-                        if (string.IsNullOrEmpty(modPath) || modNameLower.EndsWith(".exe")) continue;
-
-                        if (modPath.StartsWith(@"C:\Windows\System32", StringComparison.OrdinalIgnoreCase) ||
-                            modPath.StartsWith(@"C:\Windows\SysWOW64", StringComparison.OrdinalIgnoreCase) ||
-                            modPath.StartsWith(@"C:\Windows\WinSxS", StringComparison.OrdinalIgnoreCase))
-                            continue;
-
-                        if (WhitelistedJreDlls.Contains(modName) &&
-                            (modPath.IndexOf(@"\jre\", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                             modPath.IndexOf(@"\jdk\", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                             modPath.IndexOf(@"\bin\", StringComparison.OrdinalIgnoreCase) >= 0))
-                            continue;
-
-                        if (modNameLower.StartsWith("jna") || modNameLower.StartsWith("flatlaf") ||
-                            modNameLower.StartsWith("libtmp") || modNameLower.Contains("junixsocket") ||
-                            modNameLower.StartsWith("lwjgl") || modNameLower.StartsWith("glfw") ||
-                            modNameLower.StartsWith("openal") || modNameLower.StartsWith("jemalloc"))
+                        if (IsWhitelistedInjectedModule(modNameLower, modPath))
                             continue;
 
                         bool fromSuspiciousFolder =
@@ -1113,27 +1114,6 @@ namespace AngelMineChecker
 
                         bool cheatNameMatch = QuickScanner.CheatKeywords.Any(kw => modNameLower.Contains(kw)) ||
                                               suspiciousKeywords.Any(sk => modNameLower.Contains(sk));
-
-                        if (modNameLower == "attach.dll")
-                        {
-                            log($"Обнаружен след динамического подключения к JVM: attach.dll загружен в процесс PID {pid} (инжект внешнего чита/агента)");
-                            banReasons.Add($"Динамическое подключение к JVM (инжект) - attach.dll");
-                            continue;
-                        }
-
-                        try
-                        {
-                            var modFi = new FileInfo(modPath);
-                            if (modFi.Exists && modFi.Length > 0 && modFi.Length <= 35 * 1024 * 1024)
-                            {
-                                if (QuickScanner.CheckDoomsdayJar(modFi, out string dReason))
-                                {
-                                    log($"Обнаружен инжектированный модуль Doomsday: {modName} ({modPath}) [{dReason}]");
-                                    banReasons.Add($"Инжектирован модуль Doomsday - {modName} ({dReason})");
-                                }
-                            }
-                        }
-                        catch { }
 
                         if (cheatNameMatch || fromSuspiciousFolder)
                         {
@@ -1160,6 +1140,58 @@ namespace AngelMineChecker
             }
         }
 
+        private static bool IsWhitelistedInjectedModule(string modNameLower, string modPath)
+        {
+            if (string.IsNullOrEmpty(modNameLower) || string.IsNullOrEmpty(modPath)) return true;
+            if (modNameLower.EndsWith(".exe")) return true;
+
+            if (modPath.StartsWith(@"C:\Windows\System32", StringComparison.OrdinalIgnoreCase) ||
+                modPath.StartsWith(@"C:\Windows\SysWOW64", StringComparison.OrdinalIgnoreCase) ||
+                modPath.StartsWith(@"C:\Windows\WinSxS", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (modNameLower.StartsWith("api-ms-win-") || modNameLower.StartsWith("ext-ms-win-"))
+                return true;
+
+            if (modNameLower.StartsWith("graphics-hook") ||
+                modPath.IndexOf(@"\obs-studio-hook\", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            if (modNameLower.Contains("watermedia") ||
+                modPath.IndexOf(@"\watermedia\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                modNameLower.StartsWith("avutil") || modNameLower.StartsWith("avcodec") ||
+                modNameLower.StartsWith("avformat") || modNameLower.StartsWith("swresample") ||
+                modNameLower.StartsWith("swscale") || modNameLower.StartsWith("avfilter") ||
+                modNameLower.StartsWith("avdevice") || modNameLower.StartsWith("postproc") ||
+                modNameLower.StartsWith("jniav") || modNameLower.StartsWith("jnisw"))
+                return true;
+
+            if (modNameLower.StartsWith("libopus") || modNameLower.StartsWith("librnnoise") ||
+                modNameLower.StartsWith("libspeex") || modNameLower.StartsWith("liblame") ||
+                modPath.IndexOf(@"voicechat", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            if (modNameLower.StartsWith("jna") || modNameLower.StartsWith("flatlaf") ||
+                modNameLower.StartsWith("libtmp") || modNameLower.Contains("junixsocket") ||
+                modNameLower.StartsWith("lwjgl") || modNameLower.StartsWith("glfw") ||
+                modNameLower.StartsWith("openal") || modNameLower.StartsWith("jemalloc") ||
+                modNameLower.StartsWith("libzstd") || modNameLower.Contains("zstd-jni") ||
+                modNameLower.StartsWith("sqlite") || modNameLower.Contains("sqlitejdbc") ||
+                modNameLower.StartsWith("liblz4") || modNameLower.StartsWith("libsnappy") ||
+                modNameLower.Contains("lunarclient") || modNameLower.Contains("lunar") ||
+                modNameLower.StartsWith("netty") || modNameLower.StartsWith("leveldb"))
+                return true;
+
+            if (WhitelistedJreDlls.Contains(modNameLower) &&
+                (modPath.IndexOf(@"\jre\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 modPath.IndexOf(@"\jdk\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 modPath.IndexOf(@"\java-runtime", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 modPath.IndexOf(@"\bin\", StringComparison.OrdinalIgnoreCase) >= 0))
+                return true;
+
+            return false;
+        }
+
         private static void InspectModulesFallback(int pid, Action<string> log, List<string> banReasons)
         {
             try
@@ -1175,26 +1207,13 @@ namespace AngelMineChecker
                     try
                     {
                         string modPath = mod.FileName ?? "";
-                        string modName = mod.ModuleName.ToLower();
+                        string modName = mod.ModuleName;
+                        string modNameLower = modName.ToLower();
 
-                        if (modName.EndsWith(".exe") || modPath.Equals(mainExe, StringComparison.OrdinalIgnoreCase))
+                        if (modNameLower.EndsWith(".exe") || modPath.Equals(mainExe, StringComparison.OrdinalIgnoreCase))
                             continue;
 
-                        if (modPath.StartsWith(@"C:\Windows\System32", StringComparison.OrdinalIgnoreCase) ||
-                            modPath.StartsWith(@"C:\Windows\SysWOW64", StringComparison.OrdinalIgnoreCase) ||
-                            modPath.StartsWith(@"C:\Windows\WinSxS", StringComparison.OrdinalIgnoreCase))
-                            continue;
-
-                        if (WhitelistedJreDlls.Contains(mod.ModuleName) &&
-                            (modPath.IndexOf(@"\jre\", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                             modPath.IndexOf(@"\jdk\", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                             modPath.IndexOf(@"\bin\", StringComparison.OrdinalIgnoreCase) >= 0))
-                            continue;
-
-                        if (modName.StartsWith("jna") || modName.StartsWith("flatlaf") ||
-                            modName.StartsWith("libtmp") || modName.Contains("junixsocket") ||
-                            modName.StartsWith("lwjgl") || modName.StartsWith("glfw") ||
-                            modName.StartsWith("openal") || modName.StartsWith("jemalloc"))
+                        if (IsWhitelistedInjectedModule(modNameLower, modPath))
                             continue;
 
                         bool fromSuspiciousFolder =
@@ -1203,13 +1222,13 @@ namespace AngelMineChecker
                             modPath.IndexOf(@"\Desktop\", StringComparison.OrdinalIgnoreCase) >= 0 ||
                             modPath.IndexOf(@"\$Recycle.Bin\", StringComparison.OrdinalIgnoreCase) >= 0;
 
-                        bool cheatNameMatch = QuickScanner.CheatKeywords.Any(kw => modName.Contains(kw)) ||
-                                              suspiciousKeywords.Any(sk => modName.Contains(sk));
+                        bool cheatNameMatch = QuickScanner.CheatKeywords.Any(kw => modNameLower.Contains(kw)) ||
+                                              suspiciousKeywords.Any(sk => modNameLower.Contains(sk));
 
                         if (cheatNameMatch || fromSuspiciousFolder)
                         {
-                            log($"Найден подозрительный инжект DLL: {mod.ModuleName} ({modPath})");
-                            banReasons.Add($"Найден подозрительный инжект DLL - {mod.ModuleName} ({modPath})");
+                            log($"Найден подозрительный инжект DLL: {modName} ({modPath})");
+                            banReasons.Add($"Найден подозрительный инжект DLL - {modName} ({modPath})");
                         }
                     }
                     catch { }
