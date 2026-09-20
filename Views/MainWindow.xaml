@@ -611,6 +611,10 @@
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="box" Property="BorderBrush" Value="#FF7A00"/>
                             </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -1399,10 +1403,10 @@
                                 <StackPanel>
                                     <TextBlock Text="МОДУЛИ ПРОВЕРКИ" FontSize="11" FontWeight="Bold" Foreground="#8B95AC" Margin="0,0,0,10"/>
                                     <UniformGrid Columns="2">
-                                        <CheckBox x:Name="chkCortex" Style="{StaticResource DarkCheckBox}" Content="Cortex" IsChecked="True" Margin="0,0,6,8"/>
+                                        <CheckBox x:Name="chkCortex" Style="{StaticResource DarkCheckBox}" Content="Cortex" IsChecked="False" IsEnabled="False" Margin="0,0,6,8"/>
                                         <CheckBox x:Name="chkSystemDlc" Style="{StaticResource DarkCheckBox}" Content="SystemDLC" IsChecked="True" Margin="0,0,0,8"/>
                                         <CheckBox x:Name="chkDoomsday" Style="{StaticResource DarkCheckBox}" Content="Doomsday" IsChecked="True" Margin="0,0,6,0"/>
-                                        <CheckBox x:Name="chkLuminar" Style="{StaticResource DarkCheckBox}" Content="Luminar" IsChecked="True" Margin="0,0,0,0"/>
+                                        <CheckBox x:Name="chkLuminar" Style="{StaticResource DarkCheckBox}" Content="Luminar" IsChecked="False" IsEnabled="False" Margin="0,0,0,0"/>
                                     </UniformGrid>
                                 </StackPanel>
                             </Border>
