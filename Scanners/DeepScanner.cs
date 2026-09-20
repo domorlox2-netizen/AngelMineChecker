@@ -933,8 +933,8 @@ namespace AngelMineChecker
                                                 }
                                                 else if (pat.IsDoomsday)
                                                 {
-                                                    log($"Найдена строка чита Doomsday в памяти процесса PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
-                                                    banReasons.Add($"Строка чита Doomsday в памяти Java ({pat.Name} в PID {pid})");
+                                                    log($"Инжект Doomsday: найдена строка чита в памяти PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
+                                                    banReasons.Add($"Инжект Doomsday: строка чита в памяти Java ({pat.Name} в PID {pid})");
                                                 }
                                                 else
                                                 {

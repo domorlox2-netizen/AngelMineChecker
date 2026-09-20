@@ -217,6 +217,7 @@ namespace AngelMineChecker
             return lower.Contains("инжект") ||
                    lower.Contains("памяти") ||
                    lower.Contains("строка") ||
+                   lower.Contains("класс") ||
                    lower.Contains("сетевое") ||
                    lower.Contains("classloader") ||
                    lower.Contains("attach") ||

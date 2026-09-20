@@ -1151,17 +1151,17 @@ namespace AngelMineChecker
                                                     detectedInPid.Add(sig.Pattern);
                                                     string desc;
                                                     if (sig.Category == "classloader")
-                                                        desc = $"Внедрённый ClassLoader Doomsday в Java ({sig.Pattern} в PID {pid})";
+                                                        desc = $"Инжект Doomsday: внедрённый ClassLoader в Java ({sig.Pattern} в PID {pid})";
                                                     else if (sig.Category == "font")
-                                                        desc = $"Сетевая загрузка шрифтов Doomsday в Java ({sig.Pattern} в PID {pid})";
+                                                        desc = $"Инжект Doomsday: сетевая загрузка шрифтов в Java ({sig.Pattern} в PID {pid})";
                                                     else if (sig.Category == "network")
-                                                        desc = $"Сетевое обращение Java к серверу Doomsday ({sig.Pattern} в PID {pid})";
+                                                        desc = $"Инжект Doomsday: сетевое обращение к серверу ({sig.Pattern} в PID {pid})";
                                                     else if (sig.Category == "class")
-                                                        desc = $"Класс чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
+                                                        desc = $"Инжект Doomsday: класс чита в памяти Java ({sig.Pattern} в PID {pid})";
                                                     else if (sig.Category == "string")
-                                                        desc = $"Строка чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
+                                                        desc = $"Инжект Doomsday: строка чита в памяти Java ({sig.Pattern} в PID {pid})";
                                                     else
-                                                        desc = $"След чита Doomsday в памяти Java ({sig.Pattern} в PID {pid})";
+                                                        desc = $"Инжект Doomsday: след чита в памяти Java ({sig.Pattern} в PID {pid})";
 
                                                     log?.Invoke(desc);
                                                     banReasons.Add(desc);
