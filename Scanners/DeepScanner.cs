@@ -53,13 +53,29 @@ namespace AngelMineChecker
         private const uint PROCESS_VM_READ = 0x0010;
         private const uint PROCESS_QUERY_INFORMATION = 0x0400;
         private const uint MEM_COMMIT = 0x1000;
+        private const uint MEM_PRIVATE = 0x20000;
+        private const uint MEM_MAPPED = 0x40000;
+        private const uint MEM_IMAGE = 0x1000000;
+
+        private const uint PAGE_NOACCESS = 0x01;
         private const uint PAGE_READONLY = 0x02;
         private const uint PAGE_READWRITE = 0x04;
+        private const uint PAGE_WRITECOPY = 0x08;
+        private const uint PAGE_EXECUTE = 0x10;
         private const uint PAGE_EXECUTE_READ = 0x20;
         private const uint PAGE_EXECUTE_READWRITE = 0x40;
-        private const uint PAGE_NOACCESS = 0x01;
+        private const uint PAGE_EXECUTE_WRITECOPY = 0x80;
         private const uint PAGE_GUARD = 0x100;
         private const uint LIST_MODULES_ALL = 0x03;
+
+        private static bool IsReadablePage(uint protect)
+        {
+            if ((protect & PAGE_GUARD) != 0 || (protect & PAGE_NOACCESS) != 0)
+                return false;
+
+            return (protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
+                               PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+        }
 
         private class SearchPattern
         {
@@ -68,14 +84,18 @@ namespace AngelMineChecker
             public bool IsDoomsday { get; set; }
             public byte[] AsciiBytes { get; set; }
             public byte[] UnicodeBytes { get; set; }
+            public byte[] LowerAscii { get; set; }
+            public bool IsCaseSensitive { get; set; }
 
-            public SearchPattern(string name, bool isSystemDlc = false, bool isDoomsday = false)
+            public SearchPattern(string name, bool isSystemDlc = false, bool isDoomsday = false, bool isCaseSensitive = false)
             {
                 Name = name;
                 IsSystemDlc = isSystemDlc;
                 IsDoomsday = isDoomsday;
+                IsCaseSensitive = isCaseSensitive;
                 AsciiBytes = Encoding.ASCII.GetBytes(name);
                 UnicodeBytes = Encoding.Unicode.GetBytes(name);
+                LowerAscii = Encoding.ASCII.GetBytes(name.ToLowerInvariant());
             }
         }
 
@@ -96,7 +116,21 @@ namespace AngelMineChecker
                 new SearchPattern("imgui::createcontext"),
                 new SearchPattern("imgui_impl_win32"),
                 new SearchPattern("doomsdayclient.xyz", false, true),
+                new SearchPattern("doomsdayclient.com", false, true),
                 new SearchPattern("doomsdayclient", false, true),
+                new SearchPattern("doomsday", false, true),
+                new SearchPattern("com/doomsday", false, true),
+                new SearchPattern("z4mfltptb", false, true),
+                new SearchPattern("arial_3_128_2.png", false, true),
+                new SearchPattern("doomsday loaded successfully", false, true),
+                new SearchPattern("starting inject shellcode", false, true),
+                new SearchPattern("injected! loading...", false, true),
+                new SearchPattern("--doomsdayargs", false, true),
+                new SearchPattern("--doomsdayversion", false, true),
+                new SearchPattern("--clickguikey", false, true),
+                new SearchPattern("failed to inject jvmti agent", false, true),
+                new SearchPattern("ru/bcloader", false, true),
+                new SearchPattern("bcloader", false, true),
                 new SearchPattern(DecodeSig("NjdjZnVlZ3UwcDhybQ=="), true),
                 new SearchPattern(DecodeSig("QVJST1dfUklHSFRaT05UQUw="), true),
                 new SearchPattern(DecodeSig("RFJPUERPV05fU1VDQ0VTUw=="), true),
@@ -108,7 +142,7 @@ namespace AngelMineChecker
 
             foreach (var str in CheckDoomsday.DoomsdayStrings)
             {
-                list.Add(new SearchPattern(str, false, true));
+                list.Add(new SearchPattern(str, false, true, true));
             }
 
             return list;
@@ -886,76 +920,46 @@ namespace AngelMineChecker
                     IntPtr address = IntPtr.Zero;
                     MEMORY_BASIC_INFORMATION mbi;
                     int structSize = Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION));
-                    int scannedRegions = 0;
                     var foundSignatures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                    const int bufferSize = 1048576;
-                    byte[] buffer = new byte[bufferSize];
-
-                    var sw = Stopwatch.StartNew();
+                    var imageMappedRegions = new List<MEMORY_BASIC_INFORMATION>();
+                    var privateRegions = new List<MEMORY_BASIC_INFORMATION>();
 
                     while (VirtualQueryEx(hProcess, address, out mbi, (uint)structSize) == structSize)
                     {
-                        if (sw.ElapsedMilliseconds > 20000 || scannedRegions > 4000)
-                            break;
-
-                        if (mbi.State == MEM_COMMIT &&
-                            (mbi.Protect & PAGE_GUARD) == 0 &&
-                            (mbi.Protect & PAGE_NOACCESS) == 0 &&
-                            ((mbi.Protect & PAGE_READWRITE) != 0 || (mbi.Protect & PAGE_EXECUTE_READWRITE) != 0 ||
-                             (mbi.Protect & PAGE_READONLY) != 0 || (mbi.Protect & PAGE_EXECUTE_READ) != 0))
+                        if (mbi.State == MEM_COMMIT && IsReadablePage(mbi.Protect))
                         {
-                            long regionBytes = mbi.RegionSize.ToInt64();
-                            long bytesToReadTotal = Math.Min(regionBytes, 33554432);
-                            long offset = 0;
-
-                            while (offset < bytesToReadTotal)
+                            if (mbi.Type == MEM_IMAGE || mbi.Type == MEM_MAPPED)
                             {
-                                int chunk = (int)Math.Min((long)bufferSize, bytesToReadTotal - offset);
-                                IntPtr readAddr = new IntPtr(mbi.BaseAddress.ToInt64() + offset);
-
-                                if (ReadProcessMemory(hProcess, readAddr, buffer, chunk, out IntPtr bytesRead) && (int)bytesRead > 0)
-                                {
-                                    int readLen = (int)bytesRead;
-
-                                    foreach (var pat in PrecompiledMemoryPatterns)
-                                    {
-                                        if (!foundSignatures.Contains(pat.Name))
-                                        {
-                                            if (ContainsBytePattern(buffer, readLen, pat.AsciiBytes) ||
-                                                ContainsBytePattern(buffer, readLen, pat.UnicodeBytes))
-                                            {
-                                                foundSignatures.Add(pat.Name);
-                                                if (pat.IsSystemDlc)
-                                                {
-                                                    log($"Найден след SystemDLC в памяти процесса PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
-                                                    banReasons.Add($"Найден след SystemDLC в памяти процесса (PID {pid}) - {pat.Name}");
-                                                }
-                                                else if (pat.IsDoomsday)
-                                                {
-                                                    log($"Инжект Doomsday: найдена строка чита в памяти PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
-                                                    banReasons.Add($"Инжект Doomsday: строка чита в памяти Java ({pat.Name} в PID {pid})");
-                                                }
-                                                else
-                                                {
-                                                    log($"Найдена сигнатура в памяти PID {pid}: {pat.Name} (адрес 0x{readAddr.ToInt64():X})");
-                                                    banReasons.Add($"Найдена сигнатура чита в памяти (PID {pid}) - {pat.Name}");
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                int step = Math.Max(chunk - 512, 1);
-                                offset += step;
+                                imageMappedRegions.Add(mbi);
                             }
-
-                            scannedRegions++;
+                            else if (mbi.Type == MEM_PRIVATE)
+                            {
+                                privateRegions.Add(mbi);
+                            }
                         }
 
                         long nextAddr = mbi.BaseAddress.ToInt64() + mbi.RegionSize.ToInt64();
                         if (nextAddr <= mbi.BaseAddress.ToInt64()) break;
                         address = new IntPtr(nextAddr);
+                    }
+
+                    const int bufferSize = 1048576;
+                    byte[] buffer = new byte[bufferSize];
+
+                    // Pass 1: MEM_IMAGE and MEM_MAPPED (Process Hacker strings mode without Private)
+                    // Very fast (<200ms) and checks all mapped files, sections, and DLLs
+                    foreach (var reg in imageMappedRegions)
+                    {
+                        ScanProcessMemoryRegion(hProcess, reg, buffer, bufferSize, foundSignatures, pid, log, banReasons);
+                    }
+
+                    // Pass 2: MEM_PRIVATE (JVM heap / stack), with a 5 second time budget
+                    var sw = Stopwatch.StartNew();
+                    foreach (var reg in privateRegions)
+                    {
+                        if (sw.ElapsedMilliseconds > 5000) break;
+                        ScanProcessMemoryRegion(hProcess, reg, buffer, bufferSize, foundSignatures, pid, log, banReasons);
                     }
                 }
                 catch (Exception ex)
@@ -972,9 +976,72 @@ namespace AngelMineChecker
             });
         }
 
-        private static bool ContainsBytePattern(byte[] buffer, int length, byte[] pattern)
+        private static void ScanProcessMemoryRegion(IntPtr hProcess, MEMORY_BASIC_INFORMATION mbi, byte[] buffer,
+            int bufferSize, HashSet<string> foundSignatures, int pid, Action<string> log, List<string> banReasons)
         {
-            if (pattern == null || pattern.Length == 0 || length < pattern.Length) return false;
+            long regionBytes = mbi.RegionSize.ToInt64();
+            long bytesToReadTotal = Math.Min(regionBytes, 33554432);
+            long offset = 0;
+
+            while (offset < bytesToReadTotal)
+            {
+                int chunk = (int)Math.Min((long)bufferSize, bytesToReadTotal - offset);
+                IntPtr readAddr = new IntPtr(mbi.BaseAddress.ToInt64() + offset);
+
+                if (ReadProcessMemory(hProcess, readAddr, buffer, chunk, out IntPtr bytesRead) && (int)bytesRead > 0)
+                {
+                    int readLen = (int)bytesRead;
+
+                    foreach (var pat in PrecompiledMemoryPatterns)
+                    {
+                        if (!foundSignatures.Contains(pat.Name))
+                        {
+                            int matchIdx = -1;
+                            if (pat.IsCaseSensitive)
+                            {
+                                matchIdx = FindBytePattern(buffer, readLen, pat.AsciiBytes);
+                                if (matchIdx < 0)
+                                    matchIdx = FindBytePattern(buffer, readLen, pat.UnicodeBytes);
+                            }
+                            else
+                            {
+                                matchIdx = FindBytePatternIgnoreCaseAscii(buffer, readLen, pat.LowerAscii);
+                                if (matchIdx < 0)
+                                    matchIdx = FindBytePatternIgnoreCaseUnicode(buffer, readLen, pat.LowerAscii);
+                            }
+
+                            if (matchIdx >= 0)
+                            {
+                                foundSignatures.Add(pat.Name);
+                                long matchAddr = readAddr.ToInt64() + matchIdx;
+                                if (pat.IsSystemDlc)
+                                {
+                                    log($"Найден след SystemDLC в памяти процесса PID {pid}: {pat.Name} (адрес 0x{matchAddr:X})");
+                                    banReasons.Add($"Найден след SystemDLC в памяти процесса (PID {pid}) - {pat.Name}");
+                                }
+                                else if (pat.IsDoomsday)
+                                {
+                                    log($"Инжект Doomsday: найдена строка чита в памяти PID {pid}: {pat.Name} (адрес 0x{matchAddr:X})");
+                                    banReasons.Add($"Инжект Doomsday: строка чита в памяти Java ({pat.Name} в PID {pid})");
+                                }
+                                else
+                                {
+                                    log($"Найдена сигнатура в памяти PID {pid}: {pat.Name} (адрес 0x{matchAddr:X})");
+                                    banReasons.Add($"Найдена сигнатура чита в памяти (PID {pid}) - {pat.Name}");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                int step = Math.Max(chunk - 512, 1);
+                offset += step;
+            }
+        }
+
+        private static int FindBytePattern(byte[] buffer, int length, byte[] pattern)
+        {
+            if (pattern == null || pattern.Length == 0 || length < pattern.Length) return -1;
             byte first = pattern[0];
             int patLen = pattern.Length;
             int maxStart = length - patLen;
@@ -983,7 +1050,7 @@ namespace AngelMineChecker
             while (start <= maxStart)
             {
                 int idx = Array.IndexOf(buffer, first, start, length - start);
-                if (idx < 0 || idx > maxStart) return false;
+                if (idx < 0 || idx > maxStart) return -1;
 
                 bool match = true;
                 for (int j = 1; j < patLen; j++)
@@ -994,11 +1061,110 @@ namespace AngelMineChecker
                         break;
                     }
                 }
-                if (match) return true;
+                if (match) return idx;
 
                 start = idx + 1;
             }
-            return false;
+            return -1;
+        }
+
+        private static int FindBytePatternIgnoreCaseAscii(byte[] buffer, int length, byte[] lowerPattern)
+        {
+            if (lowerPattern == null || lowerPattern.Length == 0 || length < lowerPattern.Length) return -1;
+            byte first = lowerPattern[0];
+            byte firstUpper = (first >= 'a' && first <= 'z') ? (byte)(first - 32) : first;
+            int patLen = lowerPattern.Length;
+            int maxStart = length - patLen;
+            int start = 0;
+
+            while (start <= maxStart)
+            {
+                int idx = -1;
+                for (int i = start; i <= maxStart; i++)
+                {
+                    byte b = buffer[i];
+                    if (b == first || b == firstUpper)
+                    {
+                        idx = i;
+                        break;
+                    }
+                }
+                if (idx < 0) return -1;
+
+                bool match = true;
+                for (int j = 1; j < patLen; j++)
+                {
+                    byte b = buffer[idx + j];
+                    byte bLower = (b >= 'A' && b <= 'Z') ? (byte)(b + 32) : b;
+                    if (bLower != lowerPattern[j])
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) return idx;
+
+                start = idx + 1;
+            }
+            return -1;
+        }
+
+        private static int FindBytePatternIgnoreCaseUnicode(byte[] buffer, int length, byte[] lowerPattern)
+        {
+            if (lowerPattern == null || lowerPattern.Length == 0) return -1;
+            int patLen = lowerPattern.Length;
+            int unicodeBytesLen = patLen * 2;
+            if (length < unicodeBytesLen) return -1;
+
+            byte first = lowerPattern[0];
+            byte firstUpper = (first >= 'a' && first <= 'z') ? (byte)(first - 32) : first;
+            int maxStart = length - unicodeBytesLen;
+            int start = 0;
+
+            while (start <= maxStart)
+            {
+                int idx = -1;
+                for (int i = start; i <= maxStart; i++)
+                {
+                    if (buffer[i + 1] == 0)
+                    {
+                        byte b = buffer[i];
+                        if (b == first || b == firstUpper)
+                        {
+                            idx = i;
+                            break;
+                        }
+                    }
+                }
+                if (idx < 0) return -1;
+
+                bool match = true;
+                for (int j = 1; j < patLen; j++)
+                {
+                    int bufPos = idx + j * 2;
+                    if (buffer[bufPos + 1] != 0)
+                    {
+                        match = false;
+                        break;
+                    }
+                    byte b = buffer[bufPos];
+                    byte bLower = (b >= 'A' && b <= 'Z') ? (byte)(b + 32) : b;
+                    if (bLower != lowerPattern[j])
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) return idx;
+
+                start = idx + 1;
+            }
+            return -1;
+        }
+
+        private static bool ContainsBytePattern(byte[] buffer, int length, byte[] pattern)
+        {
+            return FindBytePattern(buffer, length, pattern) >= 0;
         }
 
         private static void CheckInjectedDlls(int pid, Action<string> log, List<string> banReasons)
