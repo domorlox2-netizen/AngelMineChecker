@@ -8,9 +8,21 @@ namespace AngelMineChecker
     {
         public static void PrintSummary(List<string> banReasons, IEnumerable<string> deletedFiles, Action<string> log)
         {
-            var cheats = new List<string>();
+            bool hasDoomsdayInject = false;
+            bool hasDoomsdayLoader = false;
+            bool hasCortexInject = false;
+            bool hasCortexLoader = false;
+            bool hasSystemDLCInject = false;
+            bool hasSystemDLCLoader = false;
+            bool hasLuminarInject = false;
+            bool hasLuminarLoader = false;
+
+            var folders = new List<string>();
+            var otherCheats = new List<string>();
             var warnings = new List<string>();
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seenWarnings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seenFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seenOther = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             if (banReasons != null)
             {
@@ -30,24 +42,114 @@ namespace AngelMineChecker
                         lower == "следы doomsday обнаружены" ||
                         lower == "обнаружен след запрещенного по" ||
                         lower == "итоги:" ||
+                        lower == "итоги проверки:" ||
                         lower.StartsWith("нарушений не обнаружено") ||
                         lower.StartsWith("удаленные exe / jar"))
                     {
                         continue;
                     }
 
-                    string normalizedKey = NormalizeKey(trimmed);
-                    if (!seen.Add(normalizedKey)) continue;
-
                     if (IsWarning(lower))
                     {
-                        warnings.Add(FormatWarning(trimmed));
+                        string warn = FormatWarning(trimmed);
+                        if (seenWarnings.Add(warn))
+                        {
+                            warnings.Add(warn);
+                        }
+                        continue;
                     }
-                    else
+
+                    if (lower.Contains("папка чита") || lower.StartsWith("найдена папка"))
                     {
-                        cheats.Add(FormatCheat(trimmed));
+                        string folderLine = FormatFolder(trimmed);
+                        if (seenFolders.Add(folderLine))
+                        {
+                            folders.Add(folderLine);
+                        }
+                        continue;
+                    }
+
+                    if (lower.Contains("doomsday") || lower.Contains("думик"))
+                    {
+                        if (IsInject(lower))
+                        {
+                            hasDoomsdayInject = true;
+                        }
+                        else
+                        {
+                            hasDoomsdayLoader = true;
+                        }
+                        continue;
+                    }
+
+                    if (lower.Contains("cortex"))
+                    {
+                        if (IsInject(lower))
+                        {
+                            hasCortexInject = true;
+                        }
+                        else
+                        {
+                            hasCortexLoader = true;
+                        }
+                        continue;
+                    }
+
+                    if (lower.Contains("systemdlc"))
+                    {
+                        if (IsInject(lower))
+                        {
+                            hasSystemDLCInject = true;
+                        }
+                        else
+                        {
+                            hasSystemDLCLoader = true;
+                        }
+                        continue;
+                    }
+
+                    if (lower.Contains("luminar"))
+                    {
+                        if (IsInject(lower))
+                        {
+                            hasLuminarInject = true;
+                        }
+                        else
+                        {
+                            hasLuminarLoader = true;
+                        }
+                        continue;
+                    }
+
+                    if (seenOther.Add(trimmed))
+                    {
+                        otherCheats.Add(trimmed);
                     }
                 }
+            }
+
+            var cheats = new List<string>();
+
+            if (hasDoomsdayInject) cheats.Add("Найден инжект Doomsday");
+            if (hasDoomsdayLoader) cheats.Add("Найден Loader Doomsday");
+
+            if (hasSystemDLCInject) cheats.Add("Найден инжект SystemDLC");
+            if (hasSystemDLCLoader) cheats.Add("Найден Loader SystemDLC");
+
+            if (hasCortexInject) cheats.Add("Найден инжект Cortex");
+            if (hasCortexLoader) cheats.Add("Найден Loader Cortex");
+
+            if (hasLuminarInject) cheats.Add("Найден инжект Luminar");
+            if (hasLuminarLoader) cheats.Add("Найден Loader Luminar");
+
+            foreach (var f in folders)
+            {
+                cheats.Add(f);
+            }
+
+            foreach (var o in otherCheats)
+            {
+                cheats.Add(o);
             }
 
             log("");
@@ -96,23 +198,16 @@ namespace AngelMineChecker
             log("");
         }
 
-        private static string NormalizeKey(string s)
+        private static bool IsInject(string lower)
         {
-            string lower = s.ToLowerInvariant();
-            if (lower.Contains("строка чита doomsday") || lower.Contains("ymj5m3rttkkspwwlcvnd"))
-            {
-                int pidIdx = lower.IndexOf("pid");
-                if (pidIdx > 0)
-                {
-                    return "doomsday_string_" + lower.Substring(pidIdx);
-                }
-                return "doomsday_string";
-            }
-            if (lower.Contains("classloader") && (lower.Contains("doomsday") || lower.Contains("инжект")))
-            {
-                return "doomsday_classloader";
-            }
-            return lower;
+            return lower.Contains("инжект") ||
+                   lower.Contains("памяти") ||
+                   lower.Contains("строка") ||
+                   lower.Contains("сетевое") ||
+                   lower.Contains("classloader") ||
+                   lower.Contains("attach") ||
+                   lower.Contains("dns") ||
+                   lower.Contains("буфер");
         }
 
         private static bool IsWarning(string lower)
@@ -127,34 +222,23 @@ namespace AngelMineChecker
                    lower.Contains("usn journal отключен");
         }
 
-        private static string FormatWarning(string s)
+        private static string FormatFolder(string s)
         {
-            return s;
+            int dashIdx = s.IndexOf('-');
+            if (dashIdx >= 0)
+            {
+                string info = s.Substring(dashIdx + 1).Trim();
+                return $"Найдена папка чита: {info}";
+            }
+            if (s.StartsWith("Найдена папка чита", StringComparison.OrdinalIgnoreCase))
+            {
+                return s;
+            }
+            return $"Найдена папка чита: {s}";
         }
 
-        private static string FormatCheat(string s)
+        private static string FormatWarning(string s)
         {
-            string lower = s.ToLowerInvariant();
-            if (lower.Contains("doomsday") || lower.Contains("думик"))
-            {
-                if (!s.StartsWith("Doomsday:", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (s.StartsWith("Инжект Doomsday", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return $"Doomsday: {s.Substring(8).Trim()}";
-                    }
-                    if (s.StartsWith("Строка чита Doomsday", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return $"Doomsday: {s.Substring(12).Trim()}";
-                    }
-                    if (s.StartsWith("Найден чит Doomsday", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string rest = s.Substring(19).Trim();
-                        if (rest.StartsWith("-")) rest = rest.Substring(1).Trim();
-                        return $"Doomsday: {rest}";
-                    }
-                }
-            }
             return s;
         }
     }
