@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.Win32;
+using AngelMineChecker.Services;
 
 namespace AngelMineChecker
 {
@@ -180,6 +181,69 @@ namespace AngelMineChecker
             return banReasons;
         }
 
+        internal static void AddGameDirectories(string gameDir, HashSet<string> modsDirs, HashSet<string> logsDirs)
+        {
+            if (string.IsNullOrEmpty(gameDir) || !Directory.Exists(gameDir)) return;
+
+            try
+            {
+                string l = Path.Combine(gameDir, "logs");
+                if (Directory.Exists(l)) logsDirs.Add(l);
+
+                string m = Path.Combine(gameDir, "mods");
+                if (Directory.Exists(m)) modsDirs.Add(m);
+
+                string[] customModFolders = new[]
+                {
+                    "usermods", "user_mods", "user-mods",
+                    "pulse_mod", "pulse_mods", "pulsemod",
+                    "custommods", "custom_mods", "addons"
+                };
+                foreach (var cm in customModFolders)
+                {
+                    string p = Path.Combine(gameDir, cm);
+                    if (Directory.Exists(p)) modsDirs.Add(p);
+                }
+
+                try
+                {
+                    foreach (var sub in Directory.GetDirectories(gameDir, "mods*"))
+                    {
+                        if (Directory.Exists(sub)) modsDirs.Add(sub);
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    foreach (var sub in Directory.GetDirectories(gameDir))
+                    {
+                        string sName = Path.GetFileName(sub).ToLowerInvariant();
+                        if (sName.Contains("mod") && Directory.Exists(sub))
+                        {
+                            modsDirs.Add(sub);
+                        }
+                    }
+                }
+                catch { }
+
+                string versionsDir = Path.Combine(gameDir, "versions");
+                if (Directory.Exists(versionsDir))
+                {
+                    try
+                    {
+                        foreach (var vSub in Directory.GetDirectories(versionsDir))
+                        {
+                            string vm = Path.Combine(vSub, "mods");
+                            if (Directory.Exists(vm)) modsDirs.Add(vm);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
         internal static (List<string> modsDirs, List<string> logsDirs) DiscoverLauncherDirectories()
         {
             var modsDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -189,68 +253,30 @@ namespace AngelMineChecker
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-            var legacyCandidates = new[]
+            try
             {
-                Path.Combine(appData, ".tlauncher", "legacy", "Minecraft", "game"),
-                Path.Combine(appData, ".tlauncher", "legacy", "Minecraft"),
-                Path.Combine(appData, ".tlauncher")
-            };
-
-            foreach (var baseDir in legacyCandidates)
-            {
-                if (Directory.Exists(baseDir))
+                var candidates = MinecraftProcessDetector.FindCandidates();
+                foreach (var cand in candidates)
                 {
-                    string m = Path.Combine(baseDir, "mods");
-                    if (Directory.Exists(m)) modsDirs.Add(m);
-                    string l = Path.Combine(baseDir, "logs");
-                    if (Directory.Exists(l)) logsDirs.Add(l);
-
-                    string versionsDir = Path.Combine(baseDir, "versions");
-                    if (Directory.Exists(versionsDir))
+                    if (!string.IsNullOrEmpty(cand.ExecutablePath))
                     {
-                        try
+                        string procDir = Path.GetDirectoryName(cand.ExecutablePath);
+                        if (!string.IsNullOrEmpty(procDir) && Directory.Exists(procDir))
                         {
-                            foreach (var vSub in Directory.GetDirectories(versionsDir))
+                            AddGameDirectories(procDir, modsDirs, logsDirs);
+                            AddGameDirectories(Path.Combine(procDir, "game"), modsDirs, logsDirs);
+
+                            string cur = procDir;
+                            for (int i = 0; i < 4 && cur != null; i++)
                             {
-                                string vm = Path.Combine(vSub, "mods");
-                                if (Directory.Exists(vm)) modsDirs.Add(vm);
+                                AddGameDirectories(Path.Combine(cur, "game"), modsDirs, logsDirs);
+                                cur = Path.GetDirectoryName(cur);
                             }
                         }
-                        catch { }
                     }
                 }
             }
-
-            var standardCandidates = new[]
-            {
-                Path.Combine(appData, ".minecraft"),
-                Path.Combine(appData, ".minecraft-launchers")
-            };
-
-            foreach (var baseDir in standardCandidates)
-            {
-                if (Directory.Exists(baseDir))
-                {
-                    string m = Path.Combine(baseDir, "mods");
-                    if (Directory.Exists(m)) modsDirs.Add(m);
-                    string l = Path.Combine(baseDir, "logs");
-                    if (Directory.Exists(l)) logsDirs.Add(l);
-
-                    string versionsDir = Path.Combine(baseDir, "versions");
-                    if (Directory.Exists(versionsDir))
-                    {
-                        try
-                        {
-                            foreach (var vSub in Directory.GetDirectories(versionsDir))
-                            {
-                                string vm = Path.Combine(vSub, "mods");
-                                if (Directory.Exists(vm)) modsDirs.Add(vm);
-                            }
-                        }
-                        catch { }
-                    }
-                }
-            }
+            catch { }
 
             try
             {
@@ -259,6 +285,31 @@ namespace AngelMineChecker
                     if (!drive.IsReady || (drive.DriveType != DriveType.Fixed && drive.DriveType != DriveType.Removable))
                         continue;
                     string r = drive.RootDirectory.FullName;
+
+                    var pulseRoots = new[]
+                    {
+                        Path.Combine(r, "PulseVisuals"),
+                        Path.Combine(r, "PulseVisual"),
+                        Path.Combine(r, "Pulse"),
+                        Path.Combine(r, "Games", "PulseVisuals"),
+                        Path.Combine(r, "Games", "PulseVisual"),
+                        Path.Combine(r, "Games", "Pulse"),
+                        Path.Combine(r, "Игры", "PulseVisuals"),
+                        Path.Combine(r, "Игры", "PulseVisual"),
+                        Path.Combine(r, "Игры", "Pulse"),
+                        Path.Combine(r, "AlABer"),
+                        Path.Combine(r, "AlABer Launcher")
+                    };
+
+                    foreach (var pRoot in pulseRoots)
+                    {
+                        if (Directory.Exists(pRoot))
+                        {
+                            AddGameDirectories(pRoot, modsDirs, logsDirs);
+                            AddGameDirectories(Path.Combine(pRoot, "game"), modsDirs, logsDirs);
+                        }
+                    }
+
                     var driveCandidates = new[]
                     {
                         Path.Combine(r, ".minecraft"),
@@ -280,24 +331,8 @@ namespace AngelMineChecker
                     {
                         if (Directory.Exists(dCandidate))
                         {
-                            string m = Path.Combine(dCandidate, "mods");
-                            if (Directory.Exists(m)) modsDirs.Add(m);
-                            string l = Path.Combine(dCandidate, "logs");
-                            if (Directory.Exists(l)) logsDirs.Add(l);
-
-                            string versionsDir = Path.Combine(dCandidate, "versions");
-                            if (Directory.Exists(versionsDir))
-                            {
-                                try
-                                {
-                                    foreach (var vSub in Directory.GetDirectories(versionsDir))
-                                    {
-                                        string vm = Path.Combine(vSub, "mods");
-                                        if (Directory.Exists(vm)) modsDirs.Add(vm);
-                                    }
-                                }
-                                catch { }
-                            }
+                            AddGameDirectories(dCandidate, modsDirs, logsDirs);
+                            AddGameDirectories(Path.Combine(dCandidate, "game"), modsDirs, logsDirs);
 
                             if (dCandidate.EndsWith("instances", StringComparison.OrdinalIgnoreCase))
                             {
@@ -305,14 +340,8 @@ namespace AngelMineChecker
                                 {
                                     foreach (var inst in Directory.GetDirectories(dCandidate))
                                     {
-                                        string im = Path.Combine(inst, "mods");
-                                        if (Directory.Exists(im)) modsDirs.Add(im);
-                                        string il = Path.Combine(inst, "logs");
-                                        if (Directory.Exists(il)) logsDirs.Add(il);
-                                        string icm = Path.Combine(inst, ".minecraft", "mods");
-                                        if (Directory.Exists(icm)) modsDirs.Add(icm);
-                                        string icl = Path.Combine(inst, ".minecraft", "logs");
-                                        if (Directory.Exists(icl)) logsDirs.Add(icl);
+                                        AddGameDirectories(inst, modsDirs, logsDirs);
+                                        AddGameDirectories(Path.Combine(inst, ".minecraft"), modsDirs, logsDirs);
                                     }
                                 }
                                 catch { }
@@ -322,6 +351,61 @@ namespace AngelMineChecker
                 }
             }
             catch { }
+
+            var userPulseCandidates = new[]
+            {
+                Path.Combine(appData, "PulseVisuals"),
+                Path.Combine(appData, "PulseVisual"),
+                Path.Combine(appData, "Pulse Visuals"),
+                Path.Combine(appData, "Pulse Visual"),
+                Path.Combine(appData, ".pulse"),
+                Path.Combine(appData, "pulse"),
+                Path.Combine(localAppData, "PulseVisuals"),
+                Path.Combine(localAppData, "PulseVisual"),
+                Path.Combine(localAppData, "Programs", "PulseVisuals"),
+                Path.Combine(localAppData, "Programs", "PulseVisual"),
+                Path.Combine(userProfile, "PulseVisuals"),
+                Path.Combine(userProfile, "PulseVisual"),
+                Path.Combine(userProfile, ".pulse")
+            };
+
+            foreach (var up in userPulseCandidates)
+            {
+                if (Directory.Exists(up))
+                {
+                    AddGameDirectories(up, modsDirs, logsDirs);
+                    AddGameDirectories(Path.Combine(up, "game"), modsDirs, logsDirs);
+                }
+            }
+
+            var legacyCandidates = new[]
+            {
+                Path.Combine(appData, ".tlauncher", "legacy", "Minecraft", "game"),
+                Path.Combine(appData, ".tlauncher", "legacy", "Minecraft"),
+                Path.Combine(appData, ".tlauncher")
+            };
+
+            foreach (var baseDir in legacyCandidates)
+            {
+                if (Directory.Exists(baseDir))
+                {
+                    AddGameDirectories(baseDir, modsDirs, logsDirs);
+                }
+            }
+
+            var standardCandidates = new[]
+            {
+                Path.Combine(appData, ".minecraft"),
+                Path.Combine(appData, ".minecraft-launchers")
+            };
+
+            foreach (var baseDir in standardCandidates)
+            {
+                if (Directory.Exists(baseDir))
+                {
+                    AddGameDirectories(baseDir, modsDirs, logsDirs);
+                }
+            }
 
             var clientCandidates = new[]
             {
@@ -339,6 +423,27 @@ namespace AngelMineChecker
                 Path.Combine(userProfile, ".lunarclient", "offline", "multiver")
             };
 
+            foreach (var baseDir in clientCandidates)
+            {
+                if (Directory.Exists(baseDir))
+                {
+                    AddGameDirectories(baseDir, modsDirs, logsDirs);
+
+                    string instancesDir = Path.Combine(baseDir, "instances");
+                    if (Directory.Exists(instancesDir))
+                    {
+                        try
+                        {
+                            foreach (var inst in Directory.GetDirectories(instancesDir))
+                            {
+                                AddGameDirectories(inst, modsDirs, logsDirs);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+
             var lunarRoots = new[]
             {
                 Path.Combine(userProfile, ".lunarclient"),
@@ -353,18 +458,11 @@ namespace AngelMineChecker
             {
                 if (Directory.Exists(lRoot))
                 {
-                    string directMods = Path.Combine(lRoot, "mods");
-                    if (Directory.Exists(directMods)) modsDirs.Add(directMods);
-                    string directLogs = Path.Combine(lRoot, "logs");
-                    if (Directory.Exists(directLogs)) logsDirs.Add(directLogs);
-
+                    AddGameDirectories(lRoot, modsDirs, logsDirs);
                     string settingsGame = Path.Combine(lRoot, "settings", "game");
                     if (Directory.Exists(settingsGame))
                     {
-                        string sgMods = Path.Combine(settingsGame, "mods");
-                        if (Directory.Exists(sgMods)) modsDirs.Add(sgMods);
-                        string sgLogs = Path.Combine(settingsGame, "logs");
-                        if (Directory.Exists(sgLogs)) logsDirs.Add(sgLogs);
+                        AddGameDirectories(settingsGame, modsDirs, logsDirs);
                     }
 
                     string offlineDir = Path.Combine(lRoot, "offline");
@@ -374,12 +472,7 @@ namespace AngelMineChecker
                         {
                             foreach (var sub in Directory.GetDirectories(offlineDir))
                             {
-                                string sm = Path.Combine(sub, "mods");
-                                if (Directory.Exists(sm)) modsDirs.Add(sm);
-                                string sl = Path.Combine(sub, "logs");
-                                if (Directory.Exists(sl)) logsDirs.Add(sl);
-                                string sa = Path.Combine(sub, "addons");
-                                if (Directory.Exists(sa)) modsDirs.Add(sa);
+                                AddGameDirectories(sub, modsDirs, logsDirs);
                             }
                         }
                         catch { }
@@ -389,83 +482,44 @@ namespace AngelMineChecker
                 }
             }
 
-            foreach (var baseDir in clientCandidates)
+            try
             {
-                if (Directory.Exists(baseDir))
+                using (var searcher = new ManagementObjectSearcher("SELECT CommandLine, ExecutablePath FROM Win32_Process WHERE Name = 'javaw.exe' OR Name = 'java.exe' OR Name = 'pulse_launcher.exe'"))
                 {
-                    string m = Path.Combine(baseDir, "mods");
-                    if (Directory.Exists(m)) modsDirs.Add(m);
-                    string l = Path.Combine(baseDir, "logs");
-                    if (Directory.Exists(l)) logsDirs.Add(l);
-
-                    string instancesDir = Path.Combine(baseDir, "instances");
-                    if (Directory.Exists(instancesDir))
+                    foreach (ManagementObject obj in searcher.Get())
                     {
-                        try
+                        string cmd = obj["CommandLine"]?.ToString();
+                        if (!string.IsNullOrEmpty(cmd))
                         {
-                            foreach (var inst in Directory.GetDirectories(instancesDir))
+                            var match = Regex.Match(cmd, @"--gameDir\s+(?:""([^""]+)""|'([^']+)'|([^\s]+))", RegexOptions.IgnoreCase);
+                            if (match.Success)
                             {
-                                string im = Path.Combine(inst, "mods");
-                                if (Directory.Exists(im)) modsDirs.Add(im);
-                                string il = Path.Combine(inst, "logs");
-                                if (Directory.Exists(il)) logsDirs.Add(il);
+                                string gDir = match.Groups[1].Success ? match.Groups[1].Value :
+                                              match.Groups[2].Success ? match.Groups[2].Value :
+                                              match.Groups[3].Value;
+
+                                if (!string.IsNullOrEmpty(gDir) && Directory.Exists(gDir))
+                                {
+                                    AddGameDirectories(gDir, modsDirs, logsDirs);
+                                }
                             }
                         }
-                        catch { }
-                    }
-                }
-            }
 
-            if (Process.GetProcessesByName("javaw").Length > 0 || Process.GetProcessesByName("java").Length > 0)
-            {
-                try
-                {
-                    using (var searcher = new ManagementObjectSearcher("SELECT CommandLine, ExecutablePath FROM Win32_Process WHERE Name = 'javaw.exe' OR Name = 'java.exe'"))
-                    {
-                        foreach (ManagementObject obj in searcher.Get())
+                        string exePath = obj["ExecutablePath"]?.ToString();
+                        if (!string.IsNullOrEmpty(exePath))
                         {
-                            string cmd = obj["CommandLine"]?.ToString();
-                            if (!string.IsNullOrEmpty(cmd))
+                            string dir = Path.GetDirectoryName(exePath);
+                            for (int i = 0; i < 6 && dir != null; i++)
                             {
-                                var match = Regex.Match(cmd, @"--gameDir\s+(?:""([^""]+)""|'([^']+)'|([^\s]+))", RegexOptions.IgnoreCase);
-                                if (match.Success)
-                                {
-                                    string gDir = match.Groups[1].Success ? match.Groups[1].Value :
-                                                  match.Groups[2].Success ? match.Groups[2].Value :
-                                                  match.Groups[3].Value;
-
-                                    if (!string.IsNullOrEmpty(gDir) && Directory.Exists(gDir))
-                                    {
-                                        string m = Path.Combine(gDir, "mods");
-                                        if (Directory.Exists(m)) modsDirs.Add(m);
-                                        string l = Path.Combine(gDir, "logs");
-                                        if (Directory.Exists(l)) logsDirs.Add(l);
-                                    }
-                                }
-                            }
-
-                            string exePath = obj["ExecutablePath"]?.ToString();
-                            if (!string.IsNullOrEmpty(exePath))
-                            {
-                                string dir = Path.GetDirectoryName(exePath);
-                                for (int i = 0; i < 6 && dir != null; i++)
-                                {
-                                    string candidateGame = Path.Combine(dir, "game");
-                                    if (Directory.Exists(candidateGame))
-                                    {
-                                        string m = Path.Combine(candidateGame, "mods");
-                                        if (Directory.Exists(m)) modsDirs.Add(m);
-                                        string l = Path.Combine(candidateGame, "logs");
-                                        if (Directory.Exists(l)) logsDirs.Add(l);
-                                    }
-                                    dir = Path.GetDirectoryName(dir);
-                                }
+                                AddGameDirectories(dir, modsDirs, logsDirs);
+                                AddGameDirectories(Path.Combine(dir, "game"), modsDirs, logsDirs);
+                                dir = Path.GetDirectoryName(dir);
                             }
                         }
                     }
                 }
-                catch { }
             }
+            catch { }
 
             try
             {
@@ -474,10 +528,8 @@ namespace AngelMineChecker
                 {
                     foreach (var inst in Directory.GetDirectories(prism))
                     {
-                        string m = Path.Combine(inst, ".minecraft", "mods");
-                        if (Directory.Exists(m)) modsDirs.Add(m);
-                        string l = Path.Combine(inst, ".minecraft", "logs");
-                        if (Directory.Exists(l)) logsDirs.Add(l);
+                        AddGameDirectories(inst, modsDirs, logsDirs);
+                        AddGameDirectories(Path.Combine(inst, ".minecraft"), modsDirs, logsDirs);
                     }
                 }
             }
@@ -490,10 +542,7 @@ namespace AngelMineChecker
                 {
                     foreach (var inst in Directory.GetDirectories(curse))
                     {
-                        string m = Path.Combine(inst, "mods");
-                        if (Directory.Exists(m)) modsDirs.Add(m);
-                        string l = Path.Combine(inst, "logs");
-                        if (Directory.Exists(l)) logsDirs.Add(l);
+                        AddGameDirectories(inst, modsDirs, logsDirs);
                     }
                 }
             }
@@ -520,7 +569,7 @@ namespace AngelMineChecker
                 foreach (var d in Directory.GetDirectories(currentDir))
                 {
                     string name = Path.GetFileName(d).ToLower();
-                    if (name == "mods" || name == "addons" || name == "user-mods" || name == "custom-mods") mods.Add(d);
+                    if (name == "mods" || name.StartsWith("mods") || name == "addons" || name == "user-mods" || name == "usermods" || name == "pulse_mod" || name == "custom-mods") mods.Add(d);
                     else if (name == "logs") logs.Add(d);
                     else if (name != "resourcepacks" && name != "saves" && name != "shaderpacks" && name != "assets" && name != "cache" && name != "natives" && name != "textures")
                     {
@@ -547,7 +596,7 @@ namespace AngelMineChecker
             "tlauncher", ".tlauncher", "cheats", "читы", "soft", "софт",
             "clients", "клиенты", "launchers", "лаунчеры", "versions",
             "downloads", "загрузки", "desktop", "рабочий стол", "documents", "документы",
-            "users", "пользователи", "instances", ".feather", ".pulse", "badlion client",
+            "users", "пользователи", "instances", ".feather", ".pulse", "pulse", "pulsevisuals", "pulsevisual", "badlion client",
             ".lunarclient", "lunarclient", "curseforge", "prismlauncher"
         };
 
@@ -1913,17 +1962,20 @@ namespace AngelMineChecker
 
             try
             {
-                var procs = Process.GetProcessesByName("javaw").Concat(Process.GetProcessesByName("java")).ToList();
-                if (procs.Count > 0)
+                var targetPids = MinecraftProcessDetector.GetAllMinecraftPids();
+                foreach (int pid in targetPids)
                 {
-                    var mainProc = procs.OrderByDescending(p =>
-                    {
-                        try { return p.WorkingSet64; } catch { return 0; }
-                    }).First();
-
                     try
                     {
-                        mcLaunchTime = mainProc.StartTime;
+                        var p = Process.GetProcessById(pid);
+                        if (!p.HasExited)
+                        {
+                            DateTime st = p.StartTime;
+                            if (!mcLaunchTime.HasValue || st < mcLaunchTime.Value)
+                            {
+                                mcLaunchTime = st;
+                            }
+                        }
                     }
                     catch { }
                 }
@@ -2209,218 +2261,8 @@ namespace AngelMineChecker
 
         internal static void CheckPulseVisual(Action<string> log, List<string> banReasons)
         {
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
-            var candidateDirs = new List<string>
-            {
-                Path.Combine(appData, "Pulse Visual"),
-                Path.Combine(appData, "pulse visual"),
-                Path.Combine(appData, "PulseVisual"),
-                Path.Combine(appData, "pulsevisual"),
-                Path.Combine(appData, ".pulsevisual"),
-                Path.Combine(appData, ".pulse_visual"),
-                Path.Combine(appData, "Pulse Visuals"),
-                Path.Combine(appData, "PulseVisuals"),
-                Path.Combine(localAppData, "Pulse Visual"),
-                Path.Combine(localAppData, "pulse visual"),
-                Path.Combine(localAppData, "PulseVisual"),
-                Path.Combine(localAppData, "pulsevisual"),
-                Path.Combine(localAppData, ".pulsevisual"),
-                Path.Combine(localAppData, "Programs", "Pulse Visual"),
-                Path.Combine(localAppData, "Programs", "PulseVisual"),
-                Path.Combine(userProfile, "Pulse Visual"),
-                Path.Combine(userProfile, "pulse visual"),
-                Path.Combine(userProfile, "PulseVisual"),
-                Path.Combine(userProfile, "pulsevisual"),
-                Path.Combine(userProfile, ".pulsevisual"),
-                Path.Combine(userProfile, ".pulse_visual"),
-                Path.Combine(appData, ".minecraft", "Pulse Visual"),
-                Path.Combine(appData, ".minecraft", "pulse visual"),
-                Path.Combine(appData, ".minecraft", "PulseVisual"),
-                Path.Combine(appData, ".minecraft", "pulsevisual"),
-                Path.Combine(appData, ".minecraft", "config", "Pulse Visual"),
-                Path.Combine(appData, ".minecraft", "config", "pulsevisual"),
-                Path.Combine(appData, ".minecraft", "config", "pulse_visual"),
-                Path.Combine(appData, ".minecraft", "config", "PulseVisual")
-            };
-
-            foreach (var d in candidateDirs)
-            {
-                try
-                {
-                    if (Directory.Exists(d) && !IsCheckerOrSelf(d))
-                    {
-                        if (seen.Add(d))
-                        {
-                            log($"Найден: Папка {Path.GetFileName(d)} ({d})");
-                            banReasons.Add($"Найдена папка чита - {Path.GetFileName(d)} ({d})");
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            var rootChecks = new[] { userProfile, appData, localAppData, Path.Combine(appData, ".minecraft") };
-            foreach (var root in rootChecks)
-            {
-                if (!Directory.Exists(root)) continue;
-                try
-                {
-                    foreach (var sub in Directory.GetDirectories(root))
-                    {
-                        if (IsCheckerOrSelf(sub)) continue;
-                        string sName = Path.GetFileName(sub).ToLower();
-                        if (sName.Contains("pulse visual") || sName.Contains("pulsevisual") ||
-                            sName.Contains("pulse_visual") || sName.Contains("pulse-visual") ||
-                            sName.Contains("pulse visuals") || sName.Contains("pulsevisuals"))
-                        {
-                            if (seen.Add(sub))
-                            {
-                                log($"Найден: Папка {Path.GetFileName(sub)} ({sub})");
-                                banReasons.Add($"Найдена папка чита - {Path.GetFileName(sub)} ({sub})");
-                            }
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            var pulseKeywords = new[]
-            {
-                "pulse visual", "pulsevisual", "pulse_visual", "pulse-visual",
-                "pulse visuals", "pulsevisuals", "pulse-visuals", "pulse_visuals"
-            };
-
-            var nonGameApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "chrome", "msedge", "firefox", "opera", "yandex", "brave", "vivaldi", "browser",
-                "discord", "telegram", "explorer", "devenv", "msbuild", "code", "rider", "idea64"
-            };
-
-            try
-            {
-                foreach (var proc in Process.GetProcesses())
-                {
-                    try
-                    {
-                        string pName = proc.ProcessName.ToLower();
-                        if (pName == "angelminechecker") continue;
-
-                        string title = "";
-                        try { title = proc.MainWindowTitle?.ToLower() ?? ""; } catch { }
-
-                        string desc = "";
-                        try { desc = proc.MainModule?.FileVersionInfo?.FileDescription?.ToLower() ?? ""; } catch { }
-
-                        string prod = "";
-                        try { prod = proc.MainModule?.FileVersionInfo?.ProductName?.ToLower() ?? ""; } catch { }
-
-                        bool isNonGame = nonGameApps.Any(app => pName.Contains(app));
-
-                        bool matched = false;
-                        foreach (var kw in pulseKeywords)
-                        {
-                            if (pName.Contains(kw) ||
-                                (!isNonGame && title.Contains(kw)) ||
-                                desc.Contains(kw) ||
-                                prod.Contains(kw))
-                            {
-                                string detail = !string.IsNullOrEmpty(proc.MainWindowTitle) ? $" [{proc.MainWindowTitle}]" : "";
-                                string key = $"proc_{proc.Id}_{proc.ProcessName}";
-                                if (seen.Add(key))
-                                {
-                                    log($"Найден активный процесс Pulse Visual: {proc.ProcessName}.exe (PID: {proc.Id}){detail}");
-                                    banReasons.Add($"Активный процесс: {proc.ProcessName}.exe (PID: {proc.Id}){detail}");
-                                }
-                                matched = true;
-                                break;
-                            }
-                        }
-
-                        if (!matched && pName == "pulse")
-                        {
-                            if (!desc.Contains("secure") && !prod.Contains("secure") &&
-                                (title.Contains("visual") || desc.Contains("visual") || prod.Contains("visual") || title.Contains("pulse") || string.IsNullOrEmpty(title)))
-                            {
-                                string detail = !string.IsNullOrEmpty(proc.MainWindowTitle) ? $" [{proc.MainWindowTitle}]" : "";
-                                string key = $"proc_{proc.Id}_{proc.ProcessName}";
-                                if (seen.Add(key))
-                                {
-                                    log($"Найден активный процесс Pulse Visual: {proc.ProcessName}.exe (PID: {proc.Id}){detail}");
-                                    banReasons.Add($"Активный процесс: {proc.ProcessName}.exe (PID: {proc.Id}){detail}");
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-
-            try
-            {
-                int currentPid = Process.GetCurrentProcess().Id;
-                using (var searcher = new ManagementObjectSearcher("SELECT ProcessId, Name, CommandLine FROM Win32_Process"))
-                using (var objects = searcher.Get())
-                {
-                    foreach (ManagementObject obj in objects)
-                    {
-                        try
-                        {
-                            string pName = (obj["Name"] as string ?? "").ToLower();
-                            string cmd = obj["CommandLine"] as string ?? "";
-                            int pid = Convert.ToInt32(obj["ProcessId"]);
-                            if (string.IsNullOrEmpty(cmd) || pid == currentPid) continue;
-
-                            string cmdLower = cmd.ToLower();
-                            if (cmdLower.Contains("angelminechecker") || nonGameApps.Any(app => pName.Contains(app))) continue;
-
-                            foreach (var kw in pulseKeywords)
-                            {
-                                if (cmdLower.Contains(kw))
-                                {
-                                    string key = $"wmi_proc_{pid}";
-                                    if (seen.Add(key))
-                                    {
-                                        log($"Найден процесс Pulse Visual: {pName} (PID: {pid})");
-                                        banReasons.Add($"Активный процесс Pulse Visual - {pName} (PID: {pid})");
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-                }
-            }
-            catch { }
-
-            try
-            {
-                string prefetchDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Prefetch");
-                if (Directory.Exists(prefetchDir))
-                {
-                    foreach (var pf in Directory.GetFiles(prefetchDir, "*.pf"))
-                    {
-                        string pfName = Path.GetFileName(pf).ToLower();
-                        if (pfName.Contains("pulsevisual") || pfName.Contains("pulse_visual") ||
-                            pfName.Contains("pulse-visual") || (pfName.Contains("pulse") && pfName.Contains("visual")))
-                        {
-                            var fi = new FileInfo(pf);
-                            if (seen.Add(fi.Name))
-                            {
-                                log($"Найден запуск в Prefetch: {fi.Name} (время: {fi.LastWriteTime:dd.MM.yyyy HH:mm:ss})");
-                                banReasons.Add($"Найден запуск чита в Prefetch - {fi.Name}");
-                            }
-                        }
-                    }
-                }
-            }
-            catch { }
+            // Pulse Visuals является лаунчером/клиентом Minecraft (pulse_launcher.exe, папка C:\PulseVisuals\game).
+            // Моды проверяются в DiscoverLauncherDirectories и ScanModsFoldersAsync.
         }
 
     }

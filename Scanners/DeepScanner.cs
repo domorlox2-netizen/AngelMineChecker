@@ -11,6 +11,7 @@ using System.Text;
 using System.Reflection;
 using System.Threading.Tasks;
 using Microsoft.Win32;
+using AngelMineChecker.Services;
 
 namespace AngelMineChecker
 {
@@ -243,7 +244,7 @@ namespace AngelMineChecker
             }
             else
             {
-                log("Процесс javaw.exe не запущен (пропуск анализа памяти и DLL инжектов)");
+                log("Процесс Minecraft (javaw.exe / pulse_launcher.exe) не запущен (пропуск анализа памяти и DLL инжектов)");
             }
 
             if (options.CheckCortex)
@@ -790,117 +791,19 @@ namespace AngelMineChecker
                 catch { }
             }
 
-            var candidates = new List<ProcessCandidate>();
-
-            var cmdMap = new Dictionary<int, string>();
-            try
-            {
-                using (var searcher = new ManagementObjectSearcher("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'javaw.exe' OR Name = 'java.exe'"))
-                using (var objects = searcher.Get())
-                {
-                    foreach (ManagementObject obj in objects)
-                    {
-                        try
-                        {
-                            int pid = Convert.ToInt32(obj["ProcessId"]);
-                            string cmd = obj["CommandLine"] as string ?? "";
-                            cmdMap[pid] = cmd;
-                        }
-                        catch { }
-                    }
-                }
-            }
-            catch { }
-
-            var procs = Process.GetProcessesByName("javaw").Concat(Process.GetProcessesByName("java"));
-            foreach (var p in procs)
-            {
-                try
-                {
-                    if (p.HasExited) continue;
-
-                    string title = "";
-                    try { title = p.MainWindowTitle ?? ""; } catch { }
-
-                    string titleLower = title.ToLower();
-                    long memBytes = 0;
-                    try { memBytes = p.WorkingSet64; } catch { }
-
-                    cmdMap.TryGetValue(p.Id, out string cmdLine);
-                    cmdLine = cmdLine ?? "";
-                    string cmdLower = cmdLine.ToLower();
-
-                    int score = 0;
-
-                    if (cmdLower.Contains("org.tlauncher") || cmdLower.Contains("ru.turikhay") ||
-                        cmdLower.Contains("tlauncher.jar") || cmdLower.Contains("launcher.jar") ||
-                        cmdLower.Contains("tl.exe") || titleLower.Contains("tlauncher") ||
-                        titleLower.Contains("legacy launcher") || titleLower.Contains("лаунчер"))
-                    {
-                        score -= 200;
-                    }
-
-                    if (cmdLower.Contains("net.minecraft.client.main.main") ||
-                        cmdLower.Contains("knotclient") ||
-                        cmdLower.Contains("fmlclientlaunchhandler") ||
-                        cmdLower.Contains("bootstraplauncher") ||
-                        cmdLower.Contains("net.minecraft.launchwrapper.launch"))
-                    {
-                        score += 300;
-                    }
-
-                    if (cmdLower.Contains("--gamedir") || cmdLower.Contains("--assetsdir"))
-                    {
-                        score += 150;
-                    }
-
-                    if (titleLower.Contains("minecraft") ||
-                        titleLower.Contains("1.21") || titleLower.Contains("1.20") ||
-                        titleLower.Contains("1.19") || titleLower.Contains("1.18") ||
-                        titleLower.Contains("1.16") || titleLower.Contains("1.12") ||
-                        titleLower.Contains("1.8") || titleLower.Contains("lunar") ||
-                        titleLower.Contains("badlion") || titleLower.Contains("feather"))
-                    {
-                        score += 150;
-                    }
-
-                    long memMb = memBytes / (1024 * 1024);
-                    if (memMb >= 1000) score += 100;
-                    if (memMb >= 1500) score += 100;
-                    if (memMb <= 350) score -= 50;
-
-                    score += (int)Math.Min(100, memMb / 20);
-
-                    candidates.Add(new ProcessCandidate
-                    {
-                        Process = p,
-                        Score = score,
-                        Title = title,
-                        MemMb = memMb
-                    });
-                }
-                catch { }
-            }
-
+            var candidates = MinecraftProcessDetector.FindCandidates();
             if (candidates.Count > 0)
             {
-                var best = candidates.OrderByDescending(c => c.Score).ThenByDescending(c => c.MemMb).First();
+                var best = candidates.First();
                 if (log != null)
                 {
-                    log($"Определен процесс Minecraft: {best.Process.ProcessName}.exe (PID {best.Process.Id}, память {best.MemMb} МБ, окно: \"{best.Title}\")");
+                    string winInfo = !string.IsNullOrEmpty(best.WindowTitle) ? $", окно: \"{best.WindowTitle}\"" : "";
+                    log($"Определен процесс Minecraft: {best.ProcessName}.exe (PID {best.Pid}, память {best.MemoryMb} МБ{winInfo})");
                 }
-                return best.Process.Id;
+                return best.Pid;
             }
 
             return -1;
-        }
-
-        private class ProcessCandidate
-        {
-            public Process Process { get; set; }
-            public int Score { get; set; }
-            public string Title { get; set; }
-            public long MemMb { get; set; }
         }
 
         private static async Task ScanProcessMemoryAsync(int pid, Action<string> log, List<string> banReasons)

@@ -100,6 +100,7 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Services\AssetDownloader.cs" />
+    <Compile Include="Services\MinecraftProcessDetector.cs" />
     <Compile Include="Scanners\ActivityScanner.cs" />
     <Compile Include="Scanners\QuickScanner.cs" />
     <Compile Include="Scanners\DeepScanner.cs" />

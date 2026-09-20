@@ -14,6 +14,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using System.Threading.Tasks;
+using AngelMineChecker.Services;
 
 namespace AngelMineChecker
 {
@@ -669,90 +670,19 @@ namespace AngelMineChecker
 
             try
             {
-                var cmdLines = new Dictionary<int, string>();
-                try
-                {
-                    using (var searcher = new System.Management.ManagementObjectSearcher("SELECT ProcessId, CommandLine FROM Win32_Process"))
-                    using (var objs = searcher.Get())
-                    {
-                        foreach (System.Management.ManagementObject obj in objs)
-                        {
-                            try
-                            {
-                                int pid = Convert.ToInt32(obj["ProcessId"]);
-                                string cmd = obj["CommandLine"] as string ?? "";
-                                if (!string.IsNullOrEmpty(cmd))
-                                {
-                                    cmdLines[pid] = cmd;
-                                }
-                            }
-                            catch { }
-                        }
-                    }
-                }
-                catch { }
-
-                var candidateProcesses = Process.GetProcesses()
-                    .Where(p =>
-                    {
-                        try
-                        {
-                            string name = p.ProcessName.ToLower();
-                            return name.Contains("java") || name.Contains("craft") || name.Contains("lunar") || name.Contains("badlion");
-                        }
-                        catch { return false; }
-                    })
-                    .Select(p =>
-                    {
-                        string title = "";
-                        try { title = p.MainWindowTitle ?? ""; } catch { }
-                        cmdLines.TryGetValue(p.Id, out string cmd);
-                        cmd = cmd ?? "";
-
-                        string titleLower = title.ToLower();
-                        string cmdLower = cmd.ToLower();
-
-                        bool isGame = titleLower.Contains("minecraft") ||
-                                      Regex.IsMatch(title, @"\b1\.\d{1,2}") ||
-                                      cmdLower.Contains("--gamedir") ||
-                                      cmdLower.Contains("net.minecraft") ||
-                                      cmdLower.Contains("knotclient");
-
-                        bool isLauncher = !isGame && (
-                            titleLower.Contains("tlauncher") ||
-                            titleLower.Contains("legacy") ||
-                            titleLower.Contains("launcher") ||
-                            cmdLower.Contains("tlauncher") ||
-                            cmdLower.Contains("launcher.jar") ||
-                            cmdLower.Contains("bootstrap") ||
-                            p.ProcessName.ToLower().Contains("launcher")
-                        );
-
-                        int priority = isGame ? 100 : (isLauncher ? 10 : 50);
-
-                        string tag = "";
-                        if (isGame) tag = " — Minecraft [Игра]";
-                        else if (isLauncher) tag = " — Лаунчер";
-
-                        string display = $"{p.ProcessName}.exe (PID: {p.Id}){tag}";
-
-                        return new { Process = p, Priority = priority, Display = display };
-                    })
-                    .OrderByDescending(x => x.Priority)
-                    .ThenByDescending(x => x.Process.Id)
-                    .ToList();
+                var candidateProcesses = MinecraftProcessDetector.FindCandidates();
 
                 if (candidateProcesses.Count > 0)
                 {
                     foreach (var item in candidateProcesses)
                     {
-                        comboProcesses.Items.Add(item.Display);
+                        comboProcesses.Items.Add(item.DisplayText);
                     }
                     comboProcesses.SelectedIndex = 0;
                 }
                 else
                 {
-                    comboProcesses.Items.Add("javaw.exe не найден (введите PID)");
+                    comboProcesses.Items.Add("Minecraft не найден (введите PID вручную)");
                     comboProcesses.SelectedIndex = 0;
                     if (txtProcessId != null && string.IsNullOrEmpty(txtProcessId.Text))
                     {

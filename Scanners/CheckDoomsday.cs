@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using AngelMineChecker.Services;
 
 namespace AngelMineChecker
 {
@@ -684,16 +685,17 @@ namespace AngelMineChecker
                     catch { }
                 }
 
-                var javaProcs = Process.GetProcessesByName("javaw").Concat(Process.GetProcessesByName("java"));
-                foreach (var proc in javaProcs)
+                var targetPids = MinecraftProcessDetector.GetAllMinecraftPids();
+                foreach (int pid in targetPids)
                 {
                     try
                     {
+                        var proc = Process.GetProcessById(pid);
                         foreach (ProcessModule mod in proc.Modules)
                         {
                             if (string.Equals(mod.ModuleName, "attach.dll", StringComparison.OrdinalIgnoreCase))
                             {
-                                log?.Invoke($"Обнаружен инжект через Attach API: attach.dll загружен в процесс Java (PID {proc.Id})");
+                                log?.Invoke($"Обнаружен инжект через Attach API: attach.dll загружен в процесс {proc.ProcessName} (PID {proc.Id})");
                                 banReasons.Add($"Динамический инжект в JVM (attach.dll в процессе PID {proc.Id})");
                                 found++;
                                 break;
@@ -713,18 +715,7 @@ namespace AngelMineChecker
             int found = 0;
             try
             {
-                var targetPids = new List<int>();
-                if (preferredPid.HasValue && preferredPid.Value > 0)
-                {
-                    targetPids.Add(preferredPid.Value);
-                }
-
-                foreach (var p in Process.GetProcessesByName("javaw").Concat(Process.GetProcessesByName("java")))
-                {
-                    if (!targetPids.Contains(p.Id))
-                        targetPids.Add(p.Id);
-                }
-
+                var targetPids = MinecraftProcessDetector.GetAllMinecraftPids(preferredPid);
                 if (targetPids.Count == 0) return 0;
 
                 string FindJcmd(Process proc)
@@ -926,17 +917,8 @@ namespace AngelMineChecker
             int found = 0;
             try
             {
-                var targetPids = new List<int>();
-                if (preferredPid.HasValue && preferredPid.Value > 0)
-                {
-                    targetPids.Add(preferredPid.Value);
-                }
-
-                foreach (var p in Process.GetProcessesByName("javaw").Concat(Process.GetProcessesByName("java")))
-                {
-                    if (!targetPids.Contains(p.Id))
-                        targetPids.Add(p.Id);
-                }
+                var targetPids = MinecraftProcessDetector.GetAllMinecraftPids(preferredPid);
+                if (targetPids.Count == 0) return 0;
 
                 foreach (int pid in targetPids)
                 {
@@ -1021,17 +1003,7 @@ namespace AngelMineChecker
             int found = 0;
             try
             {
-                var targetPids = new HashSet<int>();
-                if (preferredPid.HasValue && preferredPid.Value > 0)
-                {
-                    targetPids.Add(preferredPid.Value);
-                }
-
-                foreach (var p in Process.GetProcessesByName("javaw").Concat(Process.GetProcessesByName("java")))
-                {
-                    targetPids.Add(p.Id);
-                }
-
+                var targetPids = new HashSet<int>(MinecraftProcessDetector.GetAllMinecraftPids(preferredPid));
                 if (targetPids.Count == 0) return 0;
 
                 var psi = new ProcessStartInfo
@@ -1090,24 +1062,7 @@ namespace AngelMineChecker
             int found = 0;
             try
             {
-                var targetPids = new List<int>();
-                if (preferredPid.HasValue && preferredPid.Value > 0)
-                {
-                    targetPids.Add(preferredPid.Value);
-                }
-
-                var allProcs = Process.GetProcessesByName("javaw").Concat(Process.GetProcessesByName("java"))
-                    .OrderByDescending(p =>
-                    {
-                        try { return p.WorkingSet64; } catch { return 0L; }
-                    });
-
-                foreach (var p in allProcs)
-                {
-                    if (!targetPids.Contains(p.Id))
-                        targetPids.Add(p.Id);
-                }
-
+                var targetPids = MinecraftProcessDetector.GetAllMinecraftPids(preferredPid);
                 if (targetPids.Count == 0) return 0;
 
                 foreach (int pid in targetPids)
@@ -1117,6 +1072,10 @@ namespace AngelMineChecker
                     {
                         hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
                         if (hProcess == IntPtr.Zero) continue;
+
+                        string procName = "Minecraft";
+                        try { procName = Process.GetProcessById(pid).ProcessName; } catch { }
+                        log?.Invoke($"Сканирование памяти процесса {procName} (PID {pid}) на сигнатуры Doomsday...");
 
                         var imageMappedRegions = new List<MEMORY_BASIC_INFORMATION>();
                         var privateRegions = new List<MEMORY_BASIC_INFORMATION>();
