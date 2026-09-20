@@ -229,37 +229,8 @@ namespace AngelMineChecker
                 await CheckDoomsday.RunDoomsdayCheckAsync(log, banReasons, resolvedPid > 0 ? (int?)resolvedPid : targetPid);
             }
 
-            log("");
-            log("");
-            log("");
-            log("");
-            log("");
-            log("Итоги:");
-            if (banReasons.Count > 0)
-            {
-                foreach (var item in banReasons.Distinct())
-                {
-                    log(item);
-                }
-            }
-            else
-            {
-                log("Нарушений не обнаружено.");
-            }
-
-            log("");
-            log("Удаленные exe / jar за последние 30 минут (JournalTrace):");
-            if (deletedJournalFiles != null && deletedJournalFiles.Count > 0)
-            {
-                foreach (var item in deletedJournalFiles)
-                {
-                    log($"{item.Name} (время удаления: {item.Time:HH:mm:ss})");
-                }
-            }
-            else
-            {
-                log("Не обнаружено.");
-            }
+            var deletedStrings = deletedJournalFiles?.Select(f => $"{f.Name} (время удаления: {f.Time:HH:mm:ss})");
+            ScanSummaryFormatter.PrintSummary(banReasons, deletedStrings, log);
 
             return banReasons;
         }

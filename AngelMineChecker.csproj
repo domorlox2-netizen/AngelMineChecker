@@ -110,6 +110,7 @@
     <Compile Include="Legitka\CheckLuminar.cs" />
     <Compile Include="Models\ScanOptions.cs" />
     <Compile Include="Services\HtmlReportGenerator.cs" />
+    <Compile Include="Scanners\ScanSummaryFormatter.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

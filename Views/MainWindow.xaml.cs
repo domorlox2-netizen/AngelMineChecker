@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -503,29 +504,124 @@ namespace AngelMineChecker
             }
         }
 
+        private string GetCheckLogsText()
+        {
+            if (txtCheckLogs == null || txtCheckLogs.Document == null) return "";
+            var range = new TextRange(txtCheckLogs.Document.ContentStart, txtCheckLogs.Document.ContentEnd);
+            return range.Text.TrimEnd();
+        }
+
+        private void ClearCheckLogs()
+        {
+            if (txtCheckLogs != null && txtCheckLogs.Document != null)
+            {
+                txtCheckLogs.Document.Blocks.Clear();
+            }
+        }
+
         private void InitCheckLogs()
         {
-            if (txtCheckLogs != null)
-            {
-                txtCheckLogs.Text = "";
-            }
+            ClearCheckLogs();
         }
 
         private void AppendLog(string message)
         {
             if (txtCheckLogs == null) return;
+
+            if (message != null && message.Contains("\n"))
+            {
+                var lines = message.Replace("\r\n", "\n").Split('\n');
+                foreach (var line in lines)
+                {
+                    AppendLog(line);
+                }
+                return;
+            }
+
+            var doc = txtCheckLogs.Document;
+            if (doc == null)
+            {
+                doc = new FlowDocument { PagePadding = new Thickness(0) };
+                txtCheckLogs.Document = doc;
+            }
+
+            var p = new Paragraph { Margin = new Thickness(0, 0, 0, 1) };
+
             if (string.IsNullOrEmpty(message))
             {
-                txtCheckLogs.AppendText("\r\n");
+                p.Inlines.Add(new Run(" "));
+                doc.Blocks.Add(p);
+                txtCheckLogs.ScrollToEnd();
+                return;
             }
-            else
+
+            string trimmed = message.TrimStart();
+            bool isSummaryOrRaw = trimmed.StartsWith("=") || trimmed.StartsWith("─") ||
+                                  trimmed.StartsWith("[🔴") || trimmed.StartsWith("[⚠️") ||
+                                  trimmed.StartsWith("[📁") || trimmed.StartsWith("✅") ||
+                                  trimmed.StartsWith("•") || message.StartsWith("   ");
+
+            if (!isSummaryOrRaw)
             {
-                txtCheckLogs.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}\r\n");
+                p.Inlines.Add(new Run($"[{DateTime.Now:HH:mm:ss}] ")
+                {
+                    Foreground = new SolidColorBrush(Color.FromRgb(100, 116, 139)),
+                    FontWeight = FontWeights.Normal
+                });
             }
-            if (scrollCheckLogs != null)
+
+            SolidColorBrush textBrush = new SolidColorBrush(Color.FromRgb(203, 213, 225));
+            FontWeight weight = FontWeights.Normal;
+
+            string mLower = message.ToLowerInvariant();
+
+            if (trimmed.StartsWith("=") || message.Contains("ИТОГИ ПРОВЕРКИ"))
             {
-                scrollCheckLogs.ScrollToEnd();
+                textBrush = new SolidColorBrush(Color.FromRgb(255, 122, 0));
+                weight = FontWeights.Bold;
             }
+            else if (trimmed.StartsWith("[🔴") || mLower.Contains("читы и инжекты"))
+            {
+                textBrush = new SolidColorBrush(Color.FromRgb(239, 68, 68));
+                weight = FontWeights.Bold;
+            }
+            else if (trimmed.StartsWith("[⚠️") || mLower.Contains("службы и система"))
+            {
+                textBrush = new SolidColorBrush(Color.FromRgb(245, 158, 11));
+                weight = FontWeights.Bold;
+            }
+            else if (trimmed.StartsWith("[📁") || mLower.Contains("journaltrace") || mLower.Contains("удаленные exe"))
+            {
+                textBrush = new SolidColorBrush(Color.FromRgb(56, 189, 248));
+                weight = FontWeights.Bold;
+            }
+            else if (trimmed.StartsWith("✅") || mLower.Contains("чисто:"))
+            {
+                textBrush = new SolidColorBrush(Color.FromRgb(16, 185, 129));
+                weight = FontWeights.Bold;
+            }
+            else if (mLower.Contains("doomsday") || mLower.Contains("думик") || mLower.Contains("чит") ||
+                     mLower.Contains("инжект") || mLower.Contains("systemdlc") || mLower.Contains("cortex") ||
+                     mLower.Contains("luminar") || mLower.Contains("sk3d") || mLower.Contains("triggerbot") ||
+                     mLower.Contains("aimassist") || mLower.Contains("userassist") || mLower.Contains("recentdocs"))
+            {
+                textBrush = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+                if (trimmed.StartsWith("•")) weight = FontWeights.SemiBold;
+            }
+            else if (mLower.Contains("остановлен сервис") || mLower.Contains("отключен драйвер") ||
+                     mLower.Contains("отключен") || mLower.Contains("предупреждение") || mLower.Contains("внимание"))
+            {
+                textBrush = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+            }
+            else if (mLower.Contains("чисто") || mLower.Contains("нарушений не обнаружено") || mLower.Contains("не обнаружено"))
+            {
+                textBrush = new SolidColorBrush(Color.FromRgb(16, 185, 129));
+            }
+
+            p.Inlines.Add(new Run(message) { Foreground = textBrush, FontWeight = weight });
+            doc.Blocks.Add(p);
+
+            txtCheckLogs.ScrollToEnd();
         }
 
         private ScanOptions GetScanOptions()
@@ -711,7 +807,7 @@ namespace AngelMineChecker
                     Logs = sessionLogs,
                     Accounts = AccountScanner.FindAllAccounts()
                 };
-                HtmlReportGenerator.GenerateAndOpen(report);
+                HtmlReportGenerator.SaveReport(report);
             }
             catch (Exception ex)
             {
@@ -779,7 +875,7 @@ namespace AngelMineChecker
                     Logs = sessionLogs,
                     Accounts = AccountScanner.FindAllAccounts()
                 };
-                HtmlReportGenerator.GenerateAndOpen(report);
+                HtmlReportGenerator.SaveReport(report);
             }
             catch (Exception ex)
             {
@@ -793,19 +889,17 @@ namespace AngelMineChecker
 
         private void BtnClearLogs_Click(object sender, RoutedEventArgs e)
         {
-            if (txtCheckLogs != null)
-            {
-                txtCheckLogs.Text = "";
-            }
+            ClearCheckLogs();
         }
 
         private void BtnCopyLogs_Click(object sender, RoutedEventArgs e)
         {
-            if (txtCheckLogs != null && !string.IsNullOrEmpty(txtCheckLogs.Text))
+            string text = GetCheckLogsText();
+            if (!string.IsNullOrEmpty(text))
             {
                 try
                 {
-                    Clipboard.SetText(txtCheckLogs.Text);
+                    Clipboard.SetText(text);
                 }
                 catch { }
             }
@@ -813,7 +907,8 @@ namespace AngelMineChecker
 
         private void BtnSaveLogs_Click(object sender, RoutedEventArgs e)
         {
-            if (txtCheckLogs == null || string.IsNullOrWhiteSpace(txtCheckLogs.Text))
+            string text = GetCheckLogsText();
+            if (string.IsNullOrWhiteSpace(text))
             {
                 return;
             }
@@ -829,7 +924,7 @@ namespace AngelMineChecker
 
                 if (sfd.ShowDialog() == true)
                 {
-                    string contentToSave = CheckDoomsday.EnrichSavedLog(txtCheckLogs.Text);
+                    string contentToSave = CheckDoomsday.EnrichSavedLog(text);
                     System.IO.File.WriteAllText(sfd.FileName, contentToSave, System.Text.Encoding.UTF8);
                     AppendLog($"[Инфо] Лог успешно сохранен в файл: {sfd.FileName}");
                 }

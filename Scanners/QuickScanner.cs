@@ -175,23 +175,7 @@ namespace AngelMineChecker
                 await CheckDoomsday.RunDoomsdayCheckAsync(log, banReasons);
             }
 
-            log("");
-            log("");
-            log("");
-            log("");
-            log("");
-            log("Итоги:");
-            if (banReasons.Count > 0)
-            {
-                foreach (var reason in banReasons.Distinct())
-                {
-                    log(reason);
-                }
-            }
-            else
-            {
-                log("Нарушений не обнаружено.");
-            }
+            ScanSummaryFormatter.PrintSummary(banReasons, null, log);
 
             return banReasons;
         }
@@ -1797,10 +1781,6 @@ namespace AngelMineChecker
                     if (recentAge.TotalMinutes <= 30 && recentAge.TotalMinutes >= 0)
                     {
                         log($"Recent: недавнее изменение (< 30 мин. назад, {recentTime:dd.MM.yyyy HH:mm}, {(int)recentAge.TotalMinutes} мин. назад).");
-                    }
-                    else
-                    {
-                        log($"Recent: последнее изменение {recentTime:dd.MM.yyyy HH:mm} (> 30 мин. назад).");
                     }
                 }
             }

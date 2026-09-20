@@ -838,8 +838,21 @@ namespace AngelMineChecker
 
                                     if (isSus)
                                     {
-                                        log?.Invoke($"Обнаружен внедрённый ClassLoader Doomsday в процессе Java (PID {pid}): {clInfo}");
-                                        banReasons.Add($"Инжект Doomsday в процесс PID {pid} (внедрённый ClassLoader чита: {clInfo})");
+                                        string cleanLoader = clInfo;
+                                        string[] colsParts = clInfo.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                                        if (colsParts.Length > 0)
+                                        {
+                                            string lastPart = colsParts[colsParts.Length - 1];
+                                            int slashIdx = lastPart.IndexOf('/');
+                                            string name = (slashIdx > 0) ? lastPart.Substring(0, slashIdx) : lastPart;
+                                            if (!string.IsNullOrEmpty(name))
+                                            {
+                                                cleanLoader = name;
+                                            }
+                                        }
+
+                                        log?.Invoke($"Обнаружен внедрённый ClassLoader Doomsday в процессе Java (PID {pid}): {cleanLoader}");
+                                        banReasons.Add($"Инжект Doomsday в процесс PID {pid} (внедрённый ClassLoader чита: {cleanLoader})");
                                         found++;
                                         break;
                                     }
@@ -1521,10 +1534,9 @@ namespace AngelMineChecker
                 {
                     log?.Invoke($"           -> Найден след: {reason}");
                 }
-                banReasons.Add("Инжект думика обнаружен");
                 foreach (var reason in distinctReasons)
                 {
-                    banReasons.Add($"  * {reason}");
+                    banReasons.Add(reason);
                 }
                 return Math.Max(totalFound, internalReasons.Count);
             }
