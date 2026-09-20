@@ -575,52 +575,42 @@
         </Style>
 
         <Style x:Key="DarkCheckBox" TargetType="CheckBox">
-            <Setter Property="Foreground" Value="#64748B"/>
+            <Setter Property="Foreground" Value="#CBD5E1"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="Padding" Value="0,8"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
-                        <Border x:Name="btnBorder"
-                                Background="#0B0E17"
-                                BorderBrush="#1C2333"
-                                BorderThickness="1"
-                                CornerRadius="6"
-                                Padding="{TemplateBinding Padding}"
-                                SnapsToDevicePixels="True">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="False"/>
-                        </Border>
+                        <Grid Margin="0,3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="box" Width="17" Height="17" Background="#111420" BorderBrush="#252D42" BorderThickness="1.5" CornerRadius="4" VerticalAlignment="Center"/>
+                            <ContentPresenter Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="False"/>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="btnBorder" Property="Background" Value="#1A120B"/>
-                                <Setter TargetName="btnBorder" Property="BorderBrush" Value="#FF7A00"/>
-                                <Setter Property="Foreground" Value="#FF9433"/>
-                                <Setter Property="FontWeight" Value="Bold"/>
+                                <Setter TargetName="box" Property="Background">
+                                    <Setter.Value>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                            <GradientStop Color="#FF7A00" Offset="0.0"/>
+                                            <GradientStop Color="#FF5500" Offset="1.0"/>
+                                        </LinearGradientBrush>
+                                    </Setter.Value>
+                                </Setter>
+                                <Setter TargetName="box" Property="BorderBrush" Value="#FF6B00"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="False">
+                                <Setter Property="Foreground" Value="#64748B"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="btnBorder" Property="BorderBrush" Value="#FF7A00"/>
+                                <Setter TargetName="box" Property="BorderBrush" Value="#FF7A00"/>
                             </Trigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsMouseOver" Value="True"/>
-                                    <Condition Property="IsChecked" Value="False"/>
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="btnBorder" Property="Background" Value="#121726"/>
-                                <Setter Property="Foreground" Value="#CBD5E1"/>
-                            </MultiTrigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsMouseOver" Value="True"/>
-                                    <Condition Property="IsChecked" Value="True"/>
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="btnBorder" Property="Background" Value="#26170B"/>
-                                <Setter Property="Foreground" Value="#FFA64D"/>
-                            </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -1409,10 +1399,10 @@
                                 <StackPanel>
                                     <TextBlock Text="МОДУЛИ ПРОВЕРКИ" FontSize="11" FontWeight="Bold" Foreground="#8B95AC" Margin="0,0,0,10"/>
                                     <UniformGrid Columns="2">
-                                        <CheckBox x:Name="chkCortex" Style="{StaticResource DarkCheckBox}" Content="Cortex" IsChecked="True" Margin="0,0,4,8"/>
-                                        <CheckBox x:Name="chkSystemDlc" Style="{StaticResource DarkCheckBox}" Content="SystemDLC" IsChecked="True" Margin="4,0,0,8"/>
-                                        <CheckBox x:Name="chkDoomsday" Style="{StaticResource DarkCheckBox}" Content="Doomsday" IsChecked="True" Margin="0,0,4,0"/>
-                                        <CheckBox x:Name="chkLuminar" Style="{StaticResource DarkCheckBox}" Content="Luminar" IsChecked="True" Margin="4,0,0,0"/>
+                                        <CheckBox x:Name="chkCortex" Style="{StaticResource DarkCheckBox}" Content="Cortex" IsChecked="True" Margin="0,0,6,8"/>
+                                        <CheckBox x:Name="chkSystemDlc" Style="{StaticResource DarkCheckBox}" Content="SystemDLC" IsChecked="True" Margin="0,0,0,8"/>
+                                        <CheckBox x:Name="chkDoomsday" Style="{StaticResource DarkCheckBox}" Content="Doomsday" IsChecked="True" Margin="0,0,6,0"/>
+                                        <CheckBox x:Name="chkLuminar" Style="{StaticResource DarkCheckBox}" Content="Luminar" IsChecked="True" Margin="0,0,0,0"/>
                                     </UniformGrid>
                                 </StackPanel>
                             </Border>
