@@ -564,7 +564,8 @@ namespace AngelMineChecker
                                   trimmed.StartsWith("Предупреждения", StringComparison.OrdinalIgnoreCase) ||
                                   trimmed.StartsWith("Читы и инжекты", StringComparison.OrdinalIgnoreCase) ||
                                   trimmed.StartsWith("JournalTrace", StringComparison.OrdinalIgnoreCase) ||
-                                  trimmed.StartsWith("Чисто:", StringComparison.OrdinalIgnoreCase);
+                                  trimmed.StartsWith("Чисто:", StringComparison.OrdinalIgnoreCase) ||
+                                  trimmed.StartsWith("Вердикт", StringComparison.OrdinalIgnoreCase);
 
             if (!isSummaryOrRaw)
             {
@@ -580,7 +581,23 @@ namespace AngelMineChecker
 
             string mLower = message.ToLowerInvariant();
 
-            if (trimmed.StartsWith("=") || mLower.StartsWith("итоги проверки"))
+            if (mLower.StartsWith("вердикт"))
+            {
+                if (mLower.Contains("бан"))
+                {
+                    textBrush = new SolidColorBrush(Color.FromRgb(239, 68, 68));
+                }
+                else if (mLower.Contains("руками"))
+                {
+                    textBrush = new SolidColorBrush(Color.FromRgb(245, 158, 11));
+                }
+                else
+                {
+                    textBrush = new SolidColorBrush(Color.FromRgb(16, 185, 129));
+                }
+                weight = FontWeights.Bold;
+            }
+            else if (trimmed.StartsWith("=") || mLower.StartsWith("итоги проверки"))
             {
                 textBrush = new SolidColorBrush(Color.FromRgb(255, 122, 0));
                 weight = FontWeights.Bold;

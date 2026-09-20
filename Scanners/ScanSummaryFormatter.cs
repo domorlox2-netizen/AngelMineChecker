@@ -195,6 +195,20 @@ namespace AngelMineChecker
             {
                 log("   • Не обнаружено");
             }
+
+            log("");
+            if (cheats.Count > 0)
+            {
+                log("Вердикт: Бан");
+            }
+            else if (warnings.Count > 0 || (delList != null && delList.Count > 0))
+            {
+                log("Вердикт: Продолжи дальше руками:)");
+            }
+            else
+            {
+                log("Вердикт: Чист");
+            }
             log("");
         }
 
@@ -219,7 +233,13 @@ namespace AngelMineChecker
                    lower.Contains("sysmain") ||
                    lower.Contains("отключен драйвер bam") ||
                    lower.Contains("драйвер bam") ||
-                   lower.Contains("usn journal отключен");
+                   lower.Contains("usn journal отключен") ||
+                   lower.Contains("отключен") ||
+                   lower.Contains("очищен") ||
+                   lower.Contains("отчищен") ||
+                   lower.Contains("обфускация") ||
+                   lower.Contains("корзина была очищена") ||
+                   lower.Contains("prefetch пустая");
         }
 
         private static string FormatFolder(string s)

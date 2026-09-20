@@ -1377,6 +1377,7 @@ namespace AngelMineChecker
                     if (hasObfuscation)
                     {
                         issueLogs.Add($"Подозрительная обфускация в моде: {jarName}");
+                        modBanReasons.Add($"Подозрительная обфускация в моде: {jarName}");
                         System.Threading.Interlocked.Increment(ref totalWarnings);
                     }
                 });
@@ -1733,6 +1734,7 @@ namespace AngelMineChecker
                     if (age.TotalMinutes <= 30 && age.TotalMinutes >= 0)
                     {
                         log($"Корзина была очищена {(int)age.TotalMinutes} минут назад");
+                        banReasons.Add($"Корзина была очищена {(int)age.TotalMinutes} минут назад");
                         warnings++;
                     }
                     else
@@ -1751,7 +1753,8 @@ namespace AngelMineChecker
                     var pfFiles = Directory.GetFiles(prefetchPath, "*.pf");
                     if (pfFiles.Length == 0)
                     {
-                        log("Папка Prefetch пустая");
+                        log("Папка Prefetch пустая (очищена)");
+                        banReasons.Add("Папка Prefetch очищена");
                         warnings++;
                     }
                     else
