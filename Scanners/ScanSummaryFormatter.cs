@@ -51,36 +51,36 @@ namespace AngelMineChecker
             }
 
             log("");
-            log("==================== [ ИТОГИ ПРОВЕРКИ ] ====================");
-            log("");
+            log("Итоги проверки:");
 
             if (cheats.Count > 0)
             {
-                log($"[🔴 ЧИТЫ И ИНЖЕКТЫ]: ОБНАРУЖЕНО ({cheats.Count})");
+                log("");
+                log("Читы и инжекты:");
                 foreach (var c in cheats)
                 {
                     log($"   • {c}");
                 }
-                log("");
             }
 
             if (warnings.Count > 0)
             {
-                log($"[⚠️ СЛУЖБЫ И СИСТЕМА]: ПРЕДУПРЕЖДЕНИЯ ({warnings.Count})");
+                log("");
+                log("Предупреждения:");
                 foreach (var w in warnings)
                 {
                     log($"   • {w}");
                 }
-                log("");
             }
 
             if (cheats.Count == 0 && warnings.Count == 0)
             {
-                log("✅ [ЧИСТО]: Запрещённого ПО и системных нарушений не обнаружено!");
                 log("");
+                log("Чисто: Запрещённого ПО и нарушений не обнаружено");
             }
 
-            log("[📁 УДАЛЕННЫЕ EXE / JAR ЗА 30 МИН (JournalTrace)]:");
+            log("");
+            log("JournalTrace:");
             var delList = deletedFiles?.ToList();
             if (delList != null && delList.Count > 0)
             {
@@ -93,8 +93,7 @@ namespace AngelMineChecker
             {
                 log("   • Не обнаружено");
             }
-
-            log("============================================================");
+            log("");
         }
 
         private static string NormalizeKey(string s)

@@ -559,7 +559,12 @@ namespace AngelMineChecker
             bool isSummaryOrRaw = trimmed.StartsWith("=") || trimmed.StartsWith("─") ||
                                   trimmed.StartsWith("[🔴") || trimmed.StartsWith("[⚠️") ||
                                   trimmed.StartsWith("[📁") || trimmed.StartsWith("✅") ||
-                                  trimmed.StartsWith("•") || message.StartsWith("   ");
+                                  trimmed.StartsWith("•") || message.StartsWith("   ") ||
+                                  trimmed.StartsWith("Итоги проверки", StringComparison.OrdinalIgnoreCase) ||
+                                  trimmed.StartsWith("Предупреждения", StringComparison.OrdinalIgnoreCase) ||
+                                  trimmed.StartsWith("Читы и инжекты", StringComparison.OrdinalIgnoreCase) ||
+                                  trimmed.StartsWith("JournalTrace", StringComparison.OrdinalIgnoreCase) ||
+                                  trimmed.StartsWith("Чисто:", StringComparison.OrdinalIgnoreCase);
 
             if (!isSummaryOrRaw)
             {
@@ -575,27 +580,27 @@ namespace AngelMineChecker
 
             string mLower = message.ToLowerInvariant();
 
-            if (trimmed.StartsWith("=") || message.Contains("ИТОГИ ПРОВЕРКИ"))
+            if (trimmed.StartsWith("=") || mLower.StartsWith("итоги проверки"))
             {
                 textBrush = new SolidColorBrush(Color.FromRgb(255, 122, 0));
                 weight = FontWeights.Bold;
             }
-            else if (trimmed.StartsWith("[🔴") || mLower.Contains("читы и инжекты"))
+            else if (trimmed.StartsWith("[🔴") || mLower.StartsWith("читы и инжекты"))
             {
                 textBrush = new SolidColorBrush(Color.FromRgb(239, 68, 68));
                 weight = FontWeights.Bold;
             }
-            else if (trimmed.StartsWith("[⚠️") || mLower.Contains("службы и система"))
+            else if (trimmed.StartsWith("[⚠️") || mLower.StartsWith("предупреждения"))
             {
                 textBrush = new SolidColorBrush(Color.FromRgb(245, 158, 11));
                 weight = FontWeights.Bold;
             }
-            else if (trimmed.StartsWith("[📁") || mLower.Contains("journaltrace") || mLower.Contains("удаленные exe"))
+            else if (trimmed.StartsWith("[📁") || mLower.StartsWith("journaltrace"))
             {
                 textBrush = new SolidColorBrush(Color.FromRgb(56, 189, 248));
                 weight = FontWeights.Bold;
             }
-            else if (trimmed.StartsWith("✅") || mLower.Contains("чисто:"))
+            else if (trimmed.StartsWith("✅") || mLower.StartsWith("чисто:"))
             {
                 textBrush = new SolidColorBrush(Color.FromRgb(16, 185, 129));
                 weight = FontWeights.Bold;
@@ -612,6 +617,10 @@ namespace AngelMineChecker
                      mLower.Contains("отключен") || mLower.Contains("предупреждение") || mLower.Contains("внимание"))
             {
                 textBrush = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+            }
+            else if (mLower.Contains("удален") || mLower.Contains("deleted"))
+            {
+                textBrush = new SolidColorBrush(Color.FromRgb(56, 189, 248));
             }
             else if (mLower.Contains("чисто") || mLower.Contains("нарушений не обнаружено") || mLower.Contains("не обнаружено"))
             {
