@@ -25,8 +25,14 @@ namespace AngelMineChecker
 
         public static readonly string[] PythonInjectionSignatures = new[]
         {
+            "systemdlc",
+            "system dlc",
             "msc.systemdlc.com",
             "systemdlc.com",
+            "msc.systemdlc",
+            "@[system.txt]",
+            "@system.txt",
+            "system.txt",
             "/instruction.txt",
             "Control your system",
             "Loader Panel",
@@ -330,7 +336,8 @@ namespace AngelMineChecker
                 {
                     if (text.IndexOf("@[system.txt]", StringComparison.OrdinalIgnoreCase) >= 0 ||
                         text.IndexOf("@system.txt", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        text.IndexOf("system.txt", StringComparison.OrdinalIgnoreCase) >= 0)
+                        text.IndexOf("system.txt", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        text.IndexOf("systemdlc", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
                         if (seen.Add("clip_systxt"))
                         {
@@ -392,7 +399,13 @@ namespace AngelMineChecker
                 if (mcPids.Count == 0) return;
 
                 var hostProcs = new Dictionary<int, string>();
-                string[] hostNames = new[] { "telegram", "discord", "python", "pythonw" };
+                string[] hostNames = new[]
+                {
+                    "telegram", "ayugram", "kotatogram",
+                    "discord", "discordptb", "discordcanary", "discorddevelopment",
+                    "python", "pythonw", "py", "idle"
+                };
+
                 foreach (var hName in hostNames)
                 {
                     try
@@ -766,7 +779,13 @@ namespace AngelMineChecker
                 }
             }
 
-            string[] hostNames = new[] { "python", "pythonw", "telegram", "discord" };
+            string[] hostNames = new[]
+            {
+                "telegram", "ayugram", "kotatogram",
+                "discord", "discordptb", "discordcanary", "discorddevelopment",
+                "python", "pythonw", "py", "idle"
+            };
+
             foreach (var hName in hostNames)
             {
                 try
@@ -785,7 +804,12 @@ namespace AngelMineChecker
 
             var allSignatures = Signatures.Concat(PythonInjectionSignatures).Distinct().ToList();
 
-            foreach (int pid in targetPids)
+            var orderedPids = targetPids.OrderByDescending(pid =>
+            {
+                try { return Process.GetProcessById(pid).WorkingSet64; } catch { return 0; }
+            }).ToList();
+
+            foreach (int pid in orderedPids)
             {
                 IntPtr hProcess = IntPtr.Zero;
                 try
@@ -795,6 +819,25 @@ namespace AngelMineChecker
                     if (proc.HasExited) continue;
 
                     string procName = proc.ProcessName.ToLowerInvariant();
+                    long memMb = 0;
+                    try { memMb = proc.WorkingSet64 / (1024 * 1024); } catch { }
+
+                    if (procName.Contains("telegram") || procName.Contains("ayugram") || procName.Contains("kotatogram"))
+                    {
+                        log?.Invoke($"Проверка памяти Telegram (PID {pid}, {memMb} МБ)...");
+                    }
+                    else if (procName.Contains("discord"))
+                    {
+                        log?.Invoke($"Проверка памяти Discord (PID {pid}, {memMb} МБ)...");
+                    }
+                    else if (procName.Contains("python") || procName.Contains("idle") || procName == "py")
+                    {
+                        log?.Invoke($"Проверка памяти Python (PID {pid}, {memMb} МБ)...");
+                    }
+                    else if (procName.Contains("javaw") || procName.Contains("pulse") || procName.Contains("java"))
+                    {
+                        log?.Invoke($"Проверка памяти игры {proc.ProcessName} (PID {pid}, {memMb} МБ)...");
+                    }
 
                     hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
                     if (hProcess == IntPtr.Zero) continue;
@@ -808,7 +851,7 @@ namespace AngelMineChecker
 
                     while (currentAddress < maxAddress && !foundInProcess)
                     {
-                        if (sw.ElapsedMilliseconds > 3000) break;
+                        if (sw.ElapsedMilliseconds > 20000) break;
 
                         MEMORY_BASIC_INFORMATION mbi;
                         int res = VirtualQueryEx(hProcess, new IntPtr(currentAddress), out mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION)));
@@ -822,7 +865,7 @@ namespace AngelMineChecker
                             bool isPrivate = mbi.Type == MEM_PRIVATE;
                             bool isExec = IsExecutableProtect(mbi.Protect);
 
-                            if ((procName.Contains("python") || procName.Contains("telegram") || procName.Contains("discord")) &&
+                            if ((procName.Contains("python") || procName.Contains("telegram") || procName.Contains("discord") || procName.Contains("ayugram")) &&
                                 isPrivate && (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == PAGE_EXECUTE_READ) &&
                                 regionBytes >= 256 * 1024)
                             {
@@ -858,7 +901,7 @@ namespace AngelMineChecker
                                                     {
                                                         banReasons.Add($"Внедрен лоадер чита в память {proc.ProcessName}.exe (Manual Map PE в PID {pid})");
                                                     }
-                                                    else if (procName.Contains("telegram") || procName.Contains("discord"))
+                                                    else if (procName.Contains("telegram") || procName.Contains("discord") || procName.Contains("ayugram"))
                                                     {
                                                         banReasons.Add($"Инжект чита в {proc.ProcessName}.exe (Manual Map PE в PID {pid})");
                                                     }
@@ -873,11 +916,11 @@ namespace AngelMineChecker
                                 }
                             }
 
-                            long bytesToRead = Math.Min(regionBytes, 4 * 1024 * 1024);
+                            long bytesToRead = Math.Min(regionBytes, 8 * 1024 * 1024);
                             long offset = 0;
                             while (offset < bytesToRead && !foundInProcess)
                             {
-                                if (sw.ElapsedMilliseconds > 3000) break;
+                                if (sw.ElapsedMilliseconds > 20000) break;
 
                                 int toRead = (int)Math.Min((long)buffer.Length, bytesToRead - offset);
                                 IntPtr readAddr = new IntPtr(currentAddress + offset);
@@ -886,11 +929,16 @@ namespace AngelMineChecker
                                 {
                                     int readCount = bytesRead.ToInt32();
 
+                                    string ascii = Encoding.ASCII.GetString(buffer, 0, readCount);
+                                    string unicode = Encoding.Unicode.GetString(buffer, 0, readCount - (readCount % 2));
+
                                     if (isPrivate && isExec && regionBytes >= 64 * 1024)
                                     {
-                                        bool hasImGui = ContainsString(buffer, readCount, "Dear ImGui") ||
-                                                        (ContainsString(buffer, readCount, "imgui.ini") &&
-                                                         (ContainsString(buffer, readCount, "NavInputs") || ContainsString(buffer, readCount, "GetWindowDrawList") || ContainsString(buffer, readCount, "ItemWidth")));
+                                        bool hasImGui = ascii.IndexOf("Dear ImGui", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                        (ascii.IndexOf("imgui.ini", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                                                         (ascii.IndexOf("NavInputs", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                          ascii.IndexOf("GetWindowDrawList", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                          ascii.IndexOf("ItemWidth", StringComparison.OrdinalIgnoreCase) >= 0));
 
                                         if (hasImGui)
                                         {
@@ -905,7 +953,8 @@ namespace AngelMineChecker
 
                                     foreach (var sig in allSignatures)
                                     {
-                                        if (ContainsString(buffer, readCount, sig))
+                                        if (ascii.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                            unicode.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0)
                                         {
                                             string key = $"mem_{pid}_{sig}";
                                             if (seen.Add(key))
@@ -917,13 +966,13 @@ namespace AngelMineChecker
                                                 {
                                                     banReasons.Add($"Инжект SystemDLC через Python IDLE (PID {pid}, сигнатура: {sig})");
                                                 }
-                                                else if (procName.Contains("telegram") || procName.Contains("discord"))
+                                                else if (procName.Contains("telegram") || procName.Contains("discord") || procName.Contains("ayugram"))
                                                 {
                                                     banReasons.Add($"Инжект лоадера SystemDLC в {proc.ProcessName}.exe (PID {pid}, сигнатура: {sig})");
                                                 }
                                                 else
                                                 {
-                                                    banReasons.Add($"Найден инжект SystemDLC в памяти процесса Minecraft PID {pid} (сигнатура: {sig})");
+                                                    banReasons.Add($"Найден инжект SystemDLC в памяти процесса {proc.ProcessName}.exe PID {pid} (сигнатура: {sig})");
                                                 }
                                                 foundInProcess = true;
                                                 break;
@@ -932,7 +981,7 @@ namespace AngelMineChecker
                                     }
                                 }
 
-                                offset += toRead;
+                                offset += (toRead > 256 ? toRead - 256 : toRead);
                             }
                         }
 
@@ -960,80 +1009,6 @@ namespace AngelMineChecker
                    (protect & 0x40) != 0;
         }
 
-        private static bool ContainsString(byte[] buffer, int length, string search)
-        {
-            if (buffer == null || length <= 0 || string.IsNullOrEmpty(search)) return false;
-
-            byte[] ascii = Encoding.ASCII.GetBytes(search);
-            if (IndexOfAsciiIgnoreCase(buffer, length, ascii) >= 0) return true;
-
-            if (IndexOfUnicodeIgnoreCase(buffer, length, search) >= 0) return true;
-
-            return false;
-        }
-
-        private static int IndexOfAsciiIgnoreCase(byte[] source, int sourceLen, byte[] pattern)
-        {
-            if (pattern.Length == 0 || sourceLen < pattern.Length) return -1;
-            byte first = pattern[0];
-            byte firstLower = (first >= (byte)'A' && first <= (byte)'Z') ? (byte)(first + 32) : first;
-            byte firstUpper = (first >= (byte)'a' && first <= (byte)'z') ? (byte)(first - 32) : first;
-
-            for (int i = 0; i <= sourceLen - pattern.Length; i++)
-            {
-                byte b = source[i];
-                if (b != firstLower && b != firstUpper) continue;
-
-                bool match = true;
-                for (int j = 1; j < pattern.Length; j++)
-                {
-                    byte s = source[i + j];
-                    byte p = pattern[j];
-                    if (s != p)
-                    {
-                        byte sLow = (s >= (byte)'A' && s <= (byte)'Z') ? (byte)(s + 32) : s;
-                        byte pLow = (p >= (byte)'A' && p <= (byte)'Z') ? (byte)(p + 32) : p;
-                        if (sLow != pLow)
-                        {
-                            match = false;
-                            break;
-                        }
-                    }
-                }
-                if (match) return i;
-            }
-            return -1;
-        }
-
-        private static int IndexOfUnicodeIgnoreCase(byte[] source, int sourceLen, string pattern)
-        {
-            if (string.IsNullOrEmpty(pattern)) return -1;
-            int patByteLen = pattern.Length * 2;
-            if (sourceLen < patByteLen) return -1;
-
-            string patLower = pattern.ToLowerInvariant();
-            char firstChar = patLower[0];
-
-            for (int i = 0; i <= sourceLen - patByteLen; i += 2)
-            {
-                char c = (char)(source[i] | (source[i + 1] << 8));
-                if (char.ToLowerInvariant(c) != firstChar) continue;
-
-                bool match = true;
-                for (int j = 1; j < patLower.Length; j++)
-                {
-                    char sc = (char)(source[i + j * 2] | (source[i + j * 2 + 1] << 8));
-                    if (char.ToLowerInvariant(sc) != patLower[j])
-                    {
-                        match = false;
-                        break;
-                    }
-                }
-                if (match) return i;
-            }
-            return -1;
-        }
-
         private static void CheckDnsCache(Action<string> log, List<string> banReasons, HashSet<string> seen)
         {
             try
@@ -1053,7 +1028,8 @@ namespace AngelMineChecker
                     proc.WaitForExit(3000);
 
                     if (output.IndexOf("systemdlc.com", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        output.IndexOf("msc.systemdlc.com", StringComparison.OrdinalIgnoreCase) >= 0)
+                        output.IndexOf("msc.systemdlc.com", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        output.IndexOf("systemdlc", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
                         if (seen.Add("dns_systemdlc"))
                         {
@@ -1211,7 +1187,8 @@ namespace AngelMineChecker
 
                         if (historyContent.IndexOf("@[system.txt]", StringComparison.OrdinalIgnoreCase) >= 0 ||
                             historyContent.IndexOf("@system.txt", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            historyContent.IndexOf("system.txt", StringComparison.OrdinalIgnoreCase) >= 0)
+                            historyContent.IndexOf("system.txt", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            historyContent.IndexOf("systemdlc", StringComparison.OrdinalIgnoreCase) >= 0)
                         {
                             if (seen.Add("py_history_systxt"))
                             {
