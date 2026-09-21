@@ -119,6 +119,11 @@ namespace AngelMineChecker
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GlobalUnlock(IntPtr hMem);
 
+        private static readonly HashSet<string> ScriptExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".txt", ".py", ".pyw", ".bat", ".cmd", ".ps1", ".vbs", ".log", ".tmp", ".cfg", ".ini", ".json"
+        };
+
         public static bool CheckInFile(FileInfo file, out string foundSig)
         {
             foundSig = "";
@@ -130,32 +135,25 @@ namespace AngelMineChecker
             if (nameLower.StartsWith("+~jf") || ext == ".ttf" || ext == ".otf" || ext == ".woff" || ext == ".woff2")
                 return false;
 
+            if (!ScriptExtensions.Contains(ext) && !nameLower.Contains("dlc") && !nameLower.Contains("system") && !nameLower.Contains("jlivef"))
+                return false;
+
             try
             {
                 long len = file.Length;
-                if (len == 0 || len > 35 * 1024 * 1024) return false;
+                if (len == 0 || len > 10 * 1024 * 1024) return false;
 
                 using (var fs = file.OpenRead())
                 {
-                    byte[] buf = new byte[Math.Min((int)len, 4 * 1024 * 1024)];
+                    byte[] buf = new byte[Math.Min((int)len, 512 * 1024)];
                     int read = fs.Read(buf, 0, buf.Length);
-                    if (read >= 4)
-                    {
-                        if ((buf[0] == 0 && buf[1] == 1 && buf[2] == 0 && buf[3] == 0) ||
-                            (buf[0] == 'O' && buf[1] == 'T' && buf[2] == 'T' && buf[3] == 'O') ||
-                            (buf[0] == 'w' && buf[1] == 'O' && buf[2] == 'F' && buf[3] == 'F'))
-                            return false;
-                    }
+                    if (read <= 0) return false;
 
-                    string ascii = Encoding.ASCII.GetString(buf, 0, read);
-                    string utf8 = Encoding.UTF8.GetString(buf, 0, read);
-                    string unicode = Encoding.Unicode.GetString(buf, 0, read - (read % 2));
+                    string content = Encoding.UTF8.GetString(buf, 0, read);
 
                     foreach (var sig in Signatures)
                     {
-                        if (ascii.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            utf8.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            unicode.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0)
+                        if (content.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0)
                         {
                             foundSig = sig;
                             return true;
@@ -164,9 +162,7 @@ namespace AngelMineChecker
 
                     foreach (var sig in PythonInjectionSignatures)
                     {
-                        if (ascii.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            utf8.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            unicode.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0)
+                        if (content.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0)
                         {
                             foundSig = sig;
                             return true;
@@ -316,7 +312,7 @@ namespace AngelMineChecker
                 }
             }
 
-            string[] hostNames = new[] { "python", "pythonw", "telegram", "discord", "steam", "spotify", "epicgameslauncher", "medal", "obs64", "devenv" };
+            string[] hostNames = new[] { "python", "pythonw", "telegram", "discord" };
             foreach (var hName in hostNames)
             {
                 try
@@ -351,12 +347,15 @@ namespace AngelMineChecker
 
                     long maxAddress = 0x7FFFFFFF0000;
                     long currentAddress = 0;
-                    byte[] buffer = new byte[2 * 1024 * 1024];
+                    byte[] buffer = new byte[1024 * 1024];
 
                     bool foundInProcess = false;
+                    var sw = Stopwatch.StartNew();
 
                     while (currentAddress < maxAddress && !foundInProcess)
                     {
+                        if (sw.ElapsedMilliseconds > 3000) break;
+
                         MEMORY_BASIC_INFORMATION mbi;
                         int res = VirtualQueryEx(hProcess, new IntPtr(currentAddress), out mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION)));
                         if (res == 0) break;
@@ -381,10 +380,13 @@ namespace AngelMineChecker
                                 }
                             }
 
+                            long bytesToRead = Math.Min(regionBytes, 4 * 1024 * 1024);
                             long offset = 0;
-                            while (offset < regionBytes && !foundInProcess)
+                            while (offset < bytesToRead && !foundInProcess)
                             {
-                                int toRead = (int)Math.Min((long)buffer.Length, regionBytes - offset);
+                                if (sw.ElapsedMilliseconds > 3000) break;
+
+                                int toRead = (int)Math.Min((long)buffer.Length, bytesToRead - offset);
                                 IntPtr readAddr = new IntPtr(currentAddress + offset);
 
                                 if (ReadProcessMemory(hProcess, readAddr, buffer, toRead, out IntPtr bytesRead) && bytesRead.ToInt32() > 0)
@@ -668,11 +670,8 @@ namespace AngelMineChecker
                 Path.Combine(userProfile, "Downloads"),
                 Path.Combine(userProfile, "Desktop"),
                 Path.Combine(userProfile, "Documents"),
-                Path.GetTempPath(),
-                userProfile,
                 Path.Combine(userProfile, ".idlerc"),
-                appData,
-                localAppData
+                Path.GetTempPath()
             };
 
             foreach (var dir in probeDirs)

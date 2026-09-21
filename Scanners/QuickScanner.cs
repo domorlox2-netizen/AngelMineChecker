@@ -147,17 +147,27 @@ namespace AngelMineChecker
             ScanLatestLogs(logsDirs, log, banReasons);
             await Task.Delay(300);
 
-            log("Проверяем следы отчистки");
-            await Task.Delay(350);
+            log("Проверяем следы очистки");
+            await Task.Delay(200);
             CheckCleanupActivity(log, banReasons);
-            await Task.Delay(300);
+            await Task.Delay(150);
 
+            log("Проверка недавних загрузок");
+            await Task.Delay(100);
             CheckRecentDownloads(log, banReasons);
+
+            log("Проверка подозрительных процессов");
+            await Task.Delay(100);
             CheckSuspiciousProcesses(log, banReasons);
+
+            log("Проверка клиента PulseVisuals");
+            await Task.Delay(100);
             CheckPulseVisual(log, banReasons);
 
             if (options.CheckSystemDlc)
             {
+                log("Поиск следов SystemDLC");
+                await Task.Delay(100);
                 CheckSystemDLC.Scan(log, banReasons);
             }
 
@@ -587,7 +597,7 @@ namespace AngelMineChecker
             "steamapps", "steam", "epic games", "riot games", "ubisoft", "gog galaxy",
             "assets", "resourcepacks", "shaderpacks", "textures", "saves", "natives",
             "cache", "libraries", "jre", "jdk", "runtime", ".git", ".svn", ".idea", ".vscode",
-            "microsoft", "windowsapps"
+            "microsoft", "windowsapps", "appdata", "localappdata", "locallow", "temp", "tmp"
         };
 
         private static readonly HashSet<string> DeepScanFolderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -1851,7 +1861,6 @@ namespace AngelMineChecker
             string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             if (Directory.Exists(userProfile))
             {
-                dirsToScan.Add(userProfile);
                 string uDl = Path.Combine(userProfile, "Downloads");
                 if (Directory.Exists(uDl)) dirsToScan.Add(uDl);
                 string uDt = Path.Combine(userProfile, "Desktop");
@@ -1879,7 +1888,6 @@ namespace AngelMineChecker
                     if (drive.IsReady && (drive.DriveType == DriveType.Fixed || drive.DriveType == DriveType.Removable))
                     {
                         string r = drive.RootDirectory.FullName;
-                        dirsToScan.Add(r);
                         string dl = Path.Combine(r, "Downloads");
                         if (Directory.Exists(dl)) dirsToScan.Add(dl);
                         string dt = Path.Combine(r, "Desktop");
@@ -1902,13 +1910,16 @@ namespace AngelMineChecker
             var subDirs = new List<string>();
             foreach (var dir in dirsToScan)
             {
+                if (string.Equals(dir, tempDir, StringComparison.OrdinalIgnoreCase)) continue;
+
                 try
                 {
                     if (Directory.Exists(dir))
                     {
                         foreach (var sub in Directory.GetDirectories(dir))
                         {
-                            if (!IsCheckerOrSelf(sub) && !SkipScanFolderNames.Contains(Path.GetFileName(sub).ToLower()))
+                            string subName = Path.GetFileName(sub).ToLowerInvariant();
+                            if (!IsCheckerOrSelf(sub) && !SkipScanFolderNames.Contains(subName))
                             {
                                 subDirs.Add(sub);
                             }
