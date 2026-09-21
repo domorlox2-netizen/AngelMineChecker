@@ -17,10 +17,20 @@ namespace AngelMineChecker
             DecodeSig("NjdjZnVlZ3UwcDhybQ=="),
             DecodeSig("QVJST1dfUklHSFRaT05UQUw="),
             DecodeSig("RFJPUERPV05fU1VDQ0VTUw=="),
+            DecodeSig("Q0hFVlJPTl9SSUdIVA=="),
             DecodeSig("dG9vbHRpcF9hcnJvd191cA=="),
             DecodeSig("TjFZMEc2emZ6MEVTSm9DSQ=="),
             DecodeSig("YXJTQnFCUWZiVW5GUFRHZQ=="),
-            DecodeSig("dX1weG10aG9iaV1kWF5SWExSRkxARjo/MzgsMSYq")
+            DecodeSig("dX1weG10aG9iaV1kWF5SWExSRkxARjo/MzgsMSYq"),
+            "ARROW_RIGHTZONTAL",
+            "DROPDOWN_SUCCESS",
+            "CHEVRON_RIGHT",
+            "tooltip_arrow_up",
+            "N1Y0G6zfz0ESjoCI",
+            "N1Y0G6zfz0ESJoCI",
+            "arSBqBQfbUnFPTGe",
+            "u}pxmthobi]dX^RXLRFL@F:?38,1&*",
+            "u}pxmthobi]dX^RxLRFl@F:?38,1&*"
         };
 
         public static readonly string[] PythonInjectionSignatures = new[]
