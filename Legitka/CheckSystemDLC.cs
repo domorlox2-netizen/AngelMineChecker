@@ -69,17 +69,69 @@ namespace AngelMineChecker
         private const uint MEM_PRIVATE = 0x20000;
         private const uint PAGE_NOACCESS = 0x01;
         private const uint PAGE_GUARD = 0x100;
+        private const uint PAGE_EXECUTE = 0x10;
+        private const uint PAGE_EXECUTE_READ = 0x20;
         private const uint PAGE_EXECUTE_READWRITE = 0x40;
+        private const uint PAGE_EXECUTE_WRITECOPY = 0x80;
         private const uint PROCESS_QUERY_INFORMATION = 0x0400;
         private const uint PROCESS_VM_READ = 0x0010;
+        private const uint PROCESS_DUP_HANDLE = 0x0040;
+        private const uint THREAD_QUERY_INFORMATION = 0x0040;
+        private const uint DUPLICATE_SAME_ACCESS = 0x00000002;
         private const uint CF_UNICODETEXT = 13;
+        private const int GWLP_WNDPROC = -4;
+        private const int SystemExtendedHandleInformation = 64;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX
+        {
+            public IntPtr Object;
+            public IntPtr UniqueProcessId;
+            public IntPtr HandleValue;
+            public uint GrantedAccess;
+            public ushort CreatorBackTraceIndex;
+            public ushort ObjectTypeIndex;
+            public uint HandleAttributes;
+            public uint Reserved;
+        }
+
+        [DllImport("ntdll.dll")]
+        private static extern int NtQuerySystemInformation(
+            int SystemInformationClass,
+            IntPtr SystemInformation,
+            int SystemInformationLength,
+            out int ReturnLength);
+
+        [DllImport("ntdll.dll", SetLastError = true)]
+        private static extern int NtQueryInformationThread(
+            IntPtr ThreadHandle,
+            int ThreadInformationClass,
+            out IntPtr ThreadInformation,
+            int ThreadInformationLength,
+            out int ReturnLength);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
 
         [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenThread(uint dwDesiredAccess, bool bInheritHandle, int dwThreadId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool CloseHandle(IntPtr hObject);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool DuplicateHandle(
+            IntPtr hSourceProcessHandle,
+            IntPtr hSourceHandle,
+            IntPtr hTargetProcessHandle,
+            out IntPtr lpTargetHandle,
+            uint dwDesiredAccess,
+            [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle,
+            uint dwOptions);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint GetProcessId(IntPtr Process);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern int VirtualQueryEx(IntPtr hProcess, IntPtr lpAddress, out MEMORY_BASIC_INFORMATION lpBuffer, uint dwLength);
@@ -102,6 +154,20 @@ namespace AngelMineChecker
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
+        private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+        private static extern IntPtr GetWindowLong32(IntPtr hWnd, int nIndex);
+
+        private static IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex)
+        {
+            if (IntPtr.Size == 8)
+                return GetWindowLongPtr64(hWnd, nIndex);
+            else
+                return GetWindowLong32(hWnd, nIndex);
+        }
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool OpenClipboard(IntPtr hWndNewOwner);
@@ -192,6 +258,12 @@ namespace AngelMineChecker
 
             CheckClipboard(log, banReasons, seen);
 
+            CheckCrossProcessHandles(targetMinecraftPid, log, banReasons, seen);
+
+            CheckRemoteThreadsInMinecraft(targetMinecraftPid, log, banReasons, seen);
+
+            CheckMinecraftWindowHook(targetMinecraftPid, log, banReasons, seen);
+
             CheckGraphicsPipelineHooks(targetMinecraftPid, log, banReasons, seen);
 
             ScanProcessesMemory(targetMinecraftPid, extraPids, log, banReasons, seen);
@@ -256,6 +328,17 @@ namespace AngelMineChecker
                 string text = GetClipboardTextSafe();
                 if (!string.IsNullOrEmpty(text))
                 {
+                    if (text.IndexOf("@[system.txt]", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        text.IndexOf("@system.txt", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        text.IndexOf("system.txt", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        if (seen.Add("clip_systxt"))
+                        {
+                            log?.Invoke("Обнаружена команда запуска скрипта инжектора в буфере обмена (@[system.txt])");
+                            banReasons.Add("Команда запуска инжектора SystemDLC в буфере обмена (@[system.txt])");
+                        }
+                    }
+
                     foreach (var sig in PythonInjectionSignatures)
                     {
                         if (text.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -301,17 +384,270 @@ namespace AngelMineChecker
             catch { return null; }
         }
 
+        private static void CheckCrossProcessHandles(int? targetMinecraftPid, Action<string> log, List<string> banReasons, HashSet<string> seen)
+        {
+            try
+            {
+                var mcPids = new HashSet<int>(MinecraftProcessDetector.GetAllMinecraftPids(targetMinecraftPid));
+                if (mcPids.Count == 0) return;
+
+                var hostProcs = new Dictionary<int, string>();
+                string[] hostNames = new[] { "telegram", "discord", "python", "pythonw" };
+                foreach (var hName in hostNames)
+                {
+                    try
+                    {
+                        foreach (var p in Process.GetProcessesByName(hName))
+                        {
+                            try
+                            {
+                                if (!p.HasExited) hostProcs[p.Id] = p.ProcessName;
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+                }
+
+                if (hostProcs.Count == 0) return;
+
+                int size = 0x200000;
+                IntPtr buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    int retLen = 0;
+                    int status = NtQuerySystemInformation(SystemExtendedHandleInformation, buffer, size, out retLen);
+                    while (status == unchecked((int)0xC0000004))
+                    {
+                        Marshal.FreeHGlobal(buffer);
+                        size = Math.Max(size * 2, retLen + 0x20000);
+                        if (size > 64 * 1024 * 1024) return;
+                        buffer = Marshal.AllocHGlobal(size);
+                        status = NtQuerySystemInformation(SystemExtendedHandleInformation, buffer, size, out retLen);
+                    }
+
+                    if (status != 0) return;
+
+                    long count = Marshal.ReadInt64(buffer);
+                    IntPtr currentEntry = new IntPtr(buffer.ToInt64() + 16);
+                    int entrySize = Marshal.SizeOf(typeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX));
+
+                    IntPtr currentProcess = Process.GetCurrentProcess().Handle;
+
+                    for (long i = 0; i < count; i++)
+                    {
+                        var entry = (SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX)Marshal.PtrToStructure(currentEntry, typeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX));
+                        currentEntry = new IntPtr(currentEntry.ToInt64() + entrySize);
+
+                        int ownerPid = entry.UniqueProcessId.ToInt32();
+                        if (hostProcs.TryGetValue(ownerPid, out string hostName))
+                        {
+                            IntPtr hSource = IntPtr.Zero;
+                            try
+                            {
+                                hSource = OpenProcess(PROCESS_DUP_HANDLE, false, ownerPid);
+                                if (hSource != IntPtr.Zero)
+                                {
+                                    IntPtr hDup;
+                                    if (DuplicateHandle(hSource, entry.HandleValue, currentProcess, out hDup, 0, false, DUPLICATE_SAME_ACCESS))
+                                    {
+                                        try
+                                        {
+                                            uint targetPid = GetProcessId(hDup);
+                                            if (targetPid > 0 && mcPids.Contains((int)targetPid) && targetPid != (uint)ownerPid)
+                                            {
+                                                string key = $"handle_{ownerPid}_{targetPid}";
+                                                if (seen.Add(key))
+                                                {
+                                                    string targetProcName = "Minecraft";
+                                                    try { targetProcName = Process.GetProcessById((int)targetPid).ProcessName; } catch { }
+
+                                                    string accessDesc = (entry.GrantedAccess & 0x0020) != 0 ? "запись памяти" : "чтение/управление";
+
+                                                    log?.Invoke($"Обнаружен открытый дескриптор игры в процессе-носителе: {hostName}.exe (PID {ownerPid}) удерживает доступ ({accessDesc}, права 0x{entry.GrantedAccess:X}) к {targetProcName}.exe (PID {targetPid})");
+                                                    banReasons.Add($"Скрытый инжектор чита через {hostName}.exe (удерживает дескриптор {targetProcName}.exe PID {targetPid}, доступ: 0x{entry.GrantedAccess:X})");
+                                                }
+                                            }
+                                        }
+                                        finally
+                                        {
+                                            CloseHandle(hDup);
+                                        }
+                                    }
+                                }
+                            }
+                            catch { }
+                            finally
+                            {
+                                if (hSource != IntPtr.Zero) CloseHandle(hSource);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            }
+            catch { }
+        }
+
+        private static void CheckRemoteThreadsInMinecraft(int? targetMinecraftPid, Action<string> log, List<string> banReasons, HashSet<string> seen)
+        {
+            try
+            {
+                var pids = MinecraftProcessDetector.GetAllMinecraftPids(targetMinecraftPid);
+                if (pids.Count == 0) return;
+
+                foreach (int pid in pids)
+                {
+                    IntPtr hProcess = IntPtr.Zero;
+                    try
+                    {
+                        Process proc;
+                        try { proc = Process.GetProcessById(pid); } catch { continue; }
+                        if (proc.HasExited) continue;
+
+                        hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+                        if (hProcess == IntPtr.Zero) continue;
+
+                        ProcessThreadCollection threads;
+                        try { threads = proc.Threads; } catch { continue; }
+
+                        foreach (ProcessThread pt in threads)
+                        {
+                            IntPtr hThread = IntPtr.Zero;
+                            try
+                            {
+                                hThread = OpenThread(THREAD_QUERY_INFORMATION, false, pt.Id);
+                                if (hThread == IntPtr.Zero) continue;
+
+                                IntPtr startAddr = IntPtr.Zero;
+                                int retLen = 0;
+                                int status = NtQueryInformationThread(hThread, 9, out startAddr, IntPtr.Size, out retLen);
+                                if (status == 0 && startAddr != IntPtr.Zero)
+                                {
+                                    MEMORY_BASIC_INFORMATION mbi;
+                                    if (VirtualQueryEx(hProcess, startAddr, out mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION))) != 0)
+                                    {
+                                        if (mbi.Type == MEM_PRIVATE && IsExecutableProtect(mbi.Protect))
+                                        {
+                                            string key = $"remotethread_{pid}_{pt.Id}_{startAddr.ToInt64():X}";
+                                            if (seen.Add(key))
+                                            {
+                                                log?.Invoke($"Обнаружен подозрительный поток чита в {proc.ProcessName}.exe (TID {pt.Id}, точка входа 0x{startAddr.ToInt64():X} в немодульной памяти MEM_PRIVATE)");
+                                                banReasons.Add($"Внедрен поток чита в память процесса игры (TID {pt.Id} в {proc.ProcessName}.exe PID {pid}, адрес 0x{startAddr.ToInt64():X})");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            catch { }
+                            finally
+                            {
+                                if (hThread != IntPtr.Zero) CloseHandle(hThread);
+                            }
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        if (hProcess != IntPtr.Zero) CloseHandle(hProcess);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static void CheckMinecraftWindowHook(int? targetMinecraftPid, Action<string> log, List<string> banReasons, HashSet<string> seen)
+        {
+            try
+            {
+                var pids = new HashSet<int>(MinecraftProcessDetector.GetAllMinecraftPids(targetMinecraftPid));
+                if (pids.Count == 0) return;
+
+                EnumWindows((hWnd, lParam) =>
+                {
+                    try
+                    {
+                        GetWindowThreadProcessId(hWnd, out uint pid);
+                        if (pid > 0 && pids.Contains((int)pid))
+                        {
+                            IntPtr wndProc = GetWindowLongPtr(hWnd, GWLP_WNDPROC);
+                            if (wndProc != IntPtr.Zero && wndProc.ToInt64() > 0x10000 && wndProc.ToInt64() < 0x7FFFFFFEFFFF)
+                            {
+                                IntPtr hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, (int)pid);
+                                if (hProc != IntPtr.Zero)
+                                {
+                                    try
+                                    {
+                                        MEMORY_BASIC_INFORMATION mbi;
+                                        if (VirtualQueryEx(hProc, wndProc, out mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION))) != 0)
+                                        {
+                                            if (mbi.Type == MEM_PRIVATE && IsExecutableProtect(mbi.Protect))
+                                            {
+                                                string key = $"wndproc_{pid}_{wndProc.ToInt64():X}";
+                                                if (seen.Add(key))
+                                                {
+                                                    string procName = "Minecraft";
+                                                    try { procName = Process.GetProcessById((int)pid).ProcessName; } catch { }
+
+                                                    log?.Invoke($"Обнаружен перехват оконных сообщений (GWLP_WNDPROC в {procName}.exe PID {pid} указывает на немодульную память 0x{wndProc.ToInt64():X})");
+                                                    banReasons.Add($"Перехвачены оконные сообщения игры хуком ClickGUI/оверлея чита (PID {pid}, WNDPROC -> 0x{wndProc.ToInt64():X})");
+                                                }
+                                            }
+                                        }
+                                    }
+                                    finally
+                                    {
+                                        CloseHandle(hProc);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                    return true;
+                }, IntPtr.Zero);
+            }
+            catch { }
+        }
+
+        private static bool IsExecutableProtect(uint protect)
+        {
+            return protect == PAGE_EXECUTE ||
+                   protect == PAGE_EXECUTE_READ ||
+                   protect == PAGE_EXECUTE_READWRITE ||
+                   protect == PAGE_EXECUTE_WRITECOPY;
+        }
+
         private static void CheckGraphicsPipelineHooks(int? targetMinecraftPid, Action<string> log, List<string> banReasons, HashSet<string> seen)
         {
             var pids = MinecraftProcessDetector.GetAllMinecraftPids(targetMinecraftPid);
             if (pids.Count == 0) return;
 
+            var targetFunctions = new List<Tuple<string, IntPtr>>();
+
             IntPtr hOpengl = GetModuleHandle("opengl32.dll");
             if (hOpengl == IntPtr.Zero) hOpengl = LoadLibrary("opengl32.dll");
-            if (hOpengl == IntPtr.Zero) return;
+            if (hOpengl != IntPtr.Zero)
+            {
+                IntPtr pSwapBuffers = GetProcAddress(hOpengl, "wglSwapBuffers");
+                if (pSwapBuffers != IntPtr.Zero) targetFunctions.Add(Tuple.Create("wglSwapBuffers", pSwapBuffers));
 
-            IntPtr pSwapBuffers = GetProcAddress(hOpengl, "wglSwapBuffers");
-            if (pSwapBuffers == IntPtr.Zero) return;
+                IntPtr pGetProcAddress = GetProcAddress(hOpengl, "wglGetProcAddress");
+                if (pGetProcAddress != IntPtr.Zero) targetFunctions.Add(Tuple.Create("wglGetProcAddress", pGetProcAddress));
+            }
+
+            IntPtr hUser32 = GetModuleHandle("user32.dll");
+            if (hUser32 != IntPtr.Zero)
+            {
+                IntPtr pPeekMessageW = GetProcAddress(hUser32, "PeekMessageW");
+                if (pPeekMessageW != IntPtr.Zero) targetFunctions.Add(Tuple.Create("PeekMessageW", pPeekMessageW));
+
+                IntPtr pDispatchMessageW = GetProcAddress(hUser32, "DispatchMessageW");
+                if (pDispatchMessageW != IntPtr.Zero) targetFunctions.Add(Tuple.Create("DispatchMessageW", pDispatchMessageW));
+            }
 
             foreach (int pid in pids)
             {
@@ -321,47 +657,27 @@ namespace AngelMineChecker
                     hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
                     if (hProcess == IntPtr.Zero) continue;
 
-                    byte[] buf = new byte[16];
-                    if (ReadProcessMemory(hProcess, pSwapBuffers, buf, 16, out IntPtr bytesRead) && bytesRead.ToInt32() >= 5)
+                    foreach (var tf in targetFunctions)
                     {
-                        bool isHooked = false;
-                        long targetAddr = 0;
+                        string funcName = tf.Item1;
+                        IntPtr funcAddr = tf.Item2;
 
-                        if (buf[0] == 0xE9)
+                        byte[] buf = new byte[16];
+                        if (ReadProcessMemory(hProcess, funcAddr, buf, 16, out IntPtr bytesRead) && bytesRead.ToInt32() >= 5)
                         {
-                            int rel = BitConverter.ToInt32(buf, 1);
-                            targetAddr = pSwapBuffers.ToInt64() + 5 + rel;
-                            isHooked = true;
-                        }
-                        else if (buf[0] == 0x48 && buf[1] == 0xB8 && bytesRead.ToInt32() >= 12 && buf[10] == 0xFF && buf[11] == 0xE0)
-                        {
-                            targetAddr = BitConverter.ToInt64(buf, 2);
-                            isHooked = true;
-                        }
-                        else if (buf[0] == 0xFF && buf[1] == 0x25 && bytesRead.ToInt32() >= 6)
-                        {
-                            int ripOffset = BitConverter.ToInt32(buf, 2);
-                            IntPtr ptrAddr = new IntPtr(pSwapBuffers.ToInt64() + 6 + ripOffset);
-                            byte[] deref = new byte[8];
-                            if (ReadProcessMemory(hProcess, ptrAddr, deref, 8, out IntPtr dRead) && dRead.ToInt32() == 8)
+                            if (TryResolveHookTarget(buf, bytesRead.ToInt32(), funcAddr, hProcess, out long targetAddr) && targetAddr != 0)
                             {
-                                targetAddr = BitConverter.ToInt64(deref, 0);
-                                isHooked = true;
-                            }
-                        }
-
-                        if (isHooked && targetAddr != 0)
-                        {
-                            MEMORY_BASIC_INFORMATION mbi;
-                            if (VirtualQueryEx(hProcess, new IntPtr(targetAddr), out mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION))) != 0)
-                            {
-                                if (mbi.Type == MEM_PRIVATE || (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == 0x20))
+                                MEMORY_BASIC_INFORMATION mbi;
+                                if (VirtualQueryEx(hProcess, new IntPtr(targetAddr), out mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION))) != 0)
                                 {
-                                    string key = $"hook_wgl_{pid}_{targetAddr:X}";
-                                    if (seen.Add(key))
+                                    if (mbi.Type == MEM_PRIVATE && IsExecutableProtect(mbi.Protect))
                                     {
-                                        log?.Invoke($"Обнаружен перехват графического конвейера игры (хук wglSwapBuffers -> 0x{targetAddr:X} в немодульной памяти)");
-                                        banReasons.Add($"Внедрен графический оверлей чита (хук wglSwapBuffers в PID {pid}, адрес 0x{targetAddr:X})");
+                                        string key = $"hook_{funcName}_{pid}_{targetAddr:X}";
+                                        if (seen.Add(key))
+                                        {
+                                            log?.Invoke($"Обнаружен перехват функции {funcName} -> 0x{targetAddr:X} (хук графического конвейера/событий в немодульной памяти)");
+                                            banReasons.Add($"Внедрен графический оверлей/хук чита ({funcName} в PID {pid} -> 0x{targetAddr:X})");
+                                        }
                                     }
                                 }
                             }
@@ -374,6 +690,58 @@ namespace AngelMineChecker
                     if (hProcess != IntPtr.Zero) CloseHandle(hProcess);
                 }
             }
+        }
+
+        private static bool TryResolveHookTarget(byte[] buf, int bytesRead, IntPtr funcAddr, IntPtr hProcess, out long targetAddr)
+        {
+            targetAddr = 0;
+            if (buf == null || bytesRead < 2) return false;
+
+            if (buf[0] == 0xE9 && bytesRead >= 5)
+            {
+                int rel = BitConverter.ToInt32(buf, 1);
+                targetAddr = funcAddr.ToInt64() + 5 + rel;
+                return true;
+            }
+
+            if (buf[0] == 0xEB)
+            {
+                sbyte rel = (sbyte)buf[1];
+                targetAddr = funcAddr.ToInt64() + 2 + rel;
+                return true;
+            }
+
+            if (buf[0] == 0x48 && buf[1] == 0xB8 && bytesRead >= 12 && buf[10] == 0xFF && buf[11] == 0xE0)
+            {
+                targetAddr = BitConverter.ToInt64(buf, 2);
+                return true;
+            }
+
+            if (buf[0] == 0x49 && buf[1] == 0xBB && bytesRead >= 13 && buf[10] == 0x41 && buf[11] == 0xFF && buf[12] == 0xE3)
+            {
+                targetAddr = BitConverter.ToInt64(buf, 2);
+                return true;
+            }
+
+            if (buf[0] == 0xFF && buf[1] == 0x25 && bytesRead >= 6)
+            {
+                int ripOffset = BitConverter.ToInt32(buf, 2);
+                IntPtr ptrAddr = new IntPtr(funcAddr.ToInt64() + 6 + ripOffset);
+                byte[] deref = new byte[8];
+                if (ReadProcessMemory(hProcess, ptrAddr, deref, 8, out IntPtr dRead) && dRead.ToInt32() == 8)
+                {
+                    targetAddr = BitConverter.ToInt64(deref, 0);
+                    return true;
+                }
+            }
+
+            if (buf[0] == 0x50 && buf[1] == 0x48 && buf[2] == 0xB8 && bytesRead >= 16 && buf[15] == 0xC3)
+            {
+                targetAddr = BitConverter.ToInt64(buf, 3);
+                return true;
+            }
+
+            return false;
         }
 
         private static void ScanProcessesMemory(int? targetMinecraftPid, HashSet<int> extraPids, Action<string> log, List<string> banReasons, HashSet<string> seen)
@@ -451,8 +819,11 @@ namespace AngelMineChecker
 
                         if (mbi.State == MEM_COMMIT && IsReadablePage(mbi.Protect))
                         {
+                            bool isPrivate = mbi.Type == MEM_PRIVATE;
+                            bool isExec = IsExecutableProtect(mbi.Protect);
+
                             if ((procName.Contains("python") || procName.Contains("telegram") || procName.Contains("discord")) &&
-                                mbi.Type == MEM_PRIVATE && (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == 0x20) &&
+                                isPrivate && (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == PAGE_EXECUTE_READ) &&
                                 regionBytes >= 256 * 1024)
                             {
                                 string unbackedKey = $"unbacked_rwx_{pid}_{currentAddress:X}";
@@ -466,7 +837,7 @@ namespace AngelMineChecker
                                 }
                             }
 
-                            if (mbi.Type == MEM_PRIVATE && (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == 0x20 || mbi.Protect == 0x04) && regionBytes >= 64 * 1024)
+                            if (isPrivate && (isExec || mbi.Protect == 0x04) && regionBytes >= 64 * 1024)
                             {
                                 byte[] peHdr = new byte[512];
                                 if (ReadProcessMemory(hProcess, new IntPtr(currentAddress), peHdr, 512, out IntPtr peRead) && peRead.ToInt32() >= 256)
@@ -514,6 +885,23 @@ namespace AngelMineChecker
                                 if (ReadProcessMemory(hProcess, readAddr, buffer, toRead, out IntPtr bytesRead) && bytesRead.ToInt32() > 0)
                                 {
                                     int readCount = bytesRead.ToInt32();
+
+                                    if (isPrivate && isExec && regionBytes >= 64 * 1024)
+                                    {
+                                        bool hasImGui = ContainsString(buffer, readCount, "Dear ImGui") ||
+                                                        (ContainsString(buffer, readCount, "imgui.ini") &&
+                                                         (ContainsString(buffer, readCount, "NavInputs") || ContainsString(buffer, readCount, "GetWindowDrawList") || ContainsString(buffer, readCount, "ItemWidth")));
+
+                                        if (hasImGui)
+                                        {
+                                            string imguiKey = $"imgui_{pid}_{currentAddress:X}";
+                                            if (seen.Add(imguiKey))
+                                            {
+                                                log?.Invoke($"Обнаружен оверлей чита с затертыми PE-заголовками (Dear ImGui в немодульной памяти {proc.ProcessName}.exe PID {pid}, адрес 0x{currentAddress:X})");
+                                                banReasons.Add($"Внедрен ClickGUI оверлей чита (Dear ImGui в немодульной памяти {proc.ProcessName}.exe PID {pid})");
+                                            }
+                                        }
+                                    }
 
                                     foreach (var sig in allSignatures)
                                     {
@@ -777,6 +1165,40 @@ namespace AngelMineChecker
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
+            string[] sysTxtCandidates = new[]
+            {
+                Path.Combine(userProfile, "system.txt"),
+                Path.Combine(userProfile, "Desktop", "system.txt"),
+                Path.Combine(userProfile, "Downloads", "system.txt"),
+                Path.Combine(userProfile, "Documents", "system.txt"),
+                Path.Combine(Path.GetTempPath(), "system.txt"),
+                Path.Combine(appData, "system.txt"),
+                Path.Combine(localAppData, "system.txt")
+            };
+
+            foreach (var stc in sysTxtCandidates)
+            {
+                try
+                {
+                    if (File.Exists(stc))
+                    {
+                        var fi = new FileInfo(stc);
+                        if (fi.Length > 0 && fi.Length <= 10 * 1024 * 1024)
+                        {
+                            if (CheckInFile(fi, out string sig) || FileContainsSystemDlcKeywords(stc))
+                            {
+                                if (seen.Add("systxt_" + stc))
+                                {
+                                    log?.Invoke($"Обнаружен загрузочный скрипт SystemDLC: {fi.Name} ({stc})");
+                                    banReasons.Add($"Скрипт инжектора SystemDLC - {fi.Name} ({stc})");
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
             try
             {
                 string pyHistory = Path.Combine(userProfile, ".python_history");
@@ -786,6 +1208,18 @@ namespace AngelMineChecker
                     if (fi.Length > 0 && fi.Length <= 10 * 1024 * 1024)
                     {
                         string historyContent = File.ReadAllText(pyHistory, Encoding.UTF8);
+
+                        if (historyContent.IndexOf("@[system.txt]", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            historyContent.IndexOf("@system.txt", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            historyContent.IndexOf("system.txt", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            if (seen.Add("py_history_systxt"))
+                            {
+                                log?.Invoke("Обнаружена команда запуска SystemDLC в истории Python (.python_history: @[system.txt])");
+                                banReasons.Add("Команда запуска инжектора SystemDLC в .python_history (@[system.txt])");
+                            }
+                        }
+
                         foreach (var sig in PythonInjectionSignatures)
                         {
                             if (historyContent.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -814,7 +1248,7 @@ namespace AngelMineChecker
                     {
                         if (seen.Add("idlerc_recent"))
                         {
-                            log?.Invoke($"Обнаружен запуск подозрительного файла в истории Python IDLE (.idlerc/recent-files.lst)");
+                            log?.Invoke("Обнаружен запуск подозрительного файла в истории Python IDLE (.idlerc/recent-files.lst)");
                             banReasons.Add("Подозрительный запуск скрипта в истории Python IDLE");
                         }
                     }
@@ -889,6 +1323,27 @@ namespace AngelMineChecker
                 }
                 catch { }
             }
+        }
+
+        private static bool FileContainsSystemDlcKeywords(string path)
+        {
+            try
+            {
+                using (var fs = File.OpenRead(path))
+                {
+                    byte[] buf = new byte[Math.Min((int)fs.Length, 512 * 1024)];
+                    int read = fs.Read(buf, 0, buf.Length);
+                    if (read <= 0) return false;
+
+                    string content = Encoding.UTF8.GetString(buf, 0, read);
+                    return content.IndexOf("systemdlc", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                           content.IndexOf("msc.systemdlc", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                           content.IndexOf("Control your system", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                           content.IndexOf("7d07ec9c9054e7", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                           content.IndexOf("chr(101)+chr(120)", StringComparison.OrdinalIgnoreCase) >= 0;
+                }
+            }
+            catch { return false; }
         }
 
         private static void CheckPrefetch(Action<string> log, List<string> banReasons, HashSet<string> seen)
