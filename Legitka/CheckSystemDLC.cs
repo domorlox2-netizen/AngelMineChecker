@@ -119,6 +119,15 @@ namespace AngelMineChecker
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GlobalUnlock(IntPtr hMem);
 
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+        private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr LoadLibrary(string lpLibFileName);
+
         private static readonly HashSet<string> ScriptExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             ".txt", ".py", ".pyw", ".bat", ".cmd", ".ps1", ".vbs", ".log", ".tmp", ".cfg", ".ini", ".json"
@@ -183,9 +192,11 @@ namespace AngelMineChecker
 
             CheckClipboard(log, banReasons, seen);
 
-            CheckNetworkConnections(log, banReasons, seen, extraPids);
+            CheckGraphicsPipelineHooks(targetMinecraftPid, log, banReasons, seen);
 
             ScanProcessesMemory(targetMinecraftPid, extraPids, log, banReasons, seen);
+
+            CheckNetworkConnections(log, banReasons, seen, extraPids);
 
             CheckDnsCache(log, banReasons, seen);
 
@@ -290,6 +301,81 @@ namespace AngelMineChecker
             catch { return null; }
         }
 
+        private static void CheckGraphicsPipelineHooks(int? targetMinecraftPid, Action<string> log, List<string> banReasons, HashSet<string> seen)
+        {
+            var pids = MinecraftProcessDetector.GetAllMinecraftPids(targetMinecraftPid);
+            if (pids.Count == 0) return;
+
+            IntPtr hOpengl = GetModuleHandle("opengl32.dll");
+            if (hOpengl == IntPtr.Zero) hOpengl = LoadLibrary("opengl32.dll");
+            if (hOpengl == IntPtr.Zero) return;
+
+            IntPtr pSwapBuffers = GetProcAddress(hOpengl, "wglSwapBuffers");
+            if (pSwapBuffers == IntPtr.Zero) return;
+
+            foreach (int pid in pids)
+            {
+                IntPtr hProcess = IntPtr.Zero;
+                try
+                {
+                    hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+                    if (hProcess == IntPtr.Zero) continue;
+
+                    byte[] buf = new byte[16];
+                    if (ReadProcessMemory(hProcess, pSwapBuffers, buf, 16, out IntPtr bytesRead) && bytesRead.ToInt32() >= 5)
+                    {
+                        bool isHooked = false;
+                        long targetAddr = 0;
+
+                        if (buf[0] == 0xE9)
+                        {
+                            int rel = BitConverter.ToInt32(buf, 1);
+                            targetAddr = pSwapBuffers.ToInt64() + 5 + rel;
+                            isHooked = true;
+                        }
+                        else if (buf[0] == 0x48 && buf[1] == 0xB8 && bytesRead.ToInt32() >= 12 && buf[10] == 0xFF && buf[11] == 0xE0)
+                        {
+                            targetAddr = BitConverter.ToInt64(buf, 2);
+                            isHooked = true;
+                        }
+                        else if (buf[0] == 0xFF && buf[1] == 0x25 && bytesRead.ToInt32() >= 6)
+                        {
+                            int ripOffset = BitConverter.ToInt32(buf, 2);
+                            IntPtr ptrAddr = new IntPtr(pSwapBuffers.ToInt64() + 6 + ripOffset);
+                            byte[] deref = new byte[8];
+                            if (ReadProcessMemory(hProcess, ptrAddr, deref, 8, out IntPtr dRead) && dRead.ToInt32() == 8)
+                            {
+                                targetAddr = BitConverter.ToInt64(deref, 0);
+                                isHooked = true;
+                            }
+                        }
+
+                        if (isHooked && targetAddr != 0)
+                        {
+                            MEMORY_BASIC_INFORMATION mbi;
+                            if (VirtualQueryEx(hProcess, new IntPtr(targetAddr), out mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION))) != 0)
+                            {
+                                if (mbi.Type == MEM_PRIVATE || (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == 0x20))
+                                {
+                                    string key = $"hook_wgl_{pid}_{targetAddr:X}";
+                                    if (seen.Add(key))
+                                    {
+                                        log?.Invoke($"Обнаружен перехват графического конвейера игры (хук wglSwapBuffers -> 0x{targetAddr:X} в немодульной памяти)");
+                                        banReasons.Add($"Внедрен графический оверлей чита (хук wglSwapBuffers в PID {pid}, адрес 0x{targetAddr:X})");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+                finally
+                {
+                    if (hProcess != IntPtr.Zero) CloseHandle(hProcess);
+                }
+            }
+        }
+
         private static void ScanProcessesMemory(int? targetMinecraftPid, HashSet<int> extraPids, Action<string> log, List<string> banReasons, HashSet<string> seen)
         {
             var targetPids = new HashSet<int>();
@@ -376,6 +462,42 @@ namespace AngelMineChecker
                                     if (procName.Contains("python"))
                                     {
                                         banReasons.Add($"Обнаружен исполняемый шеллкод инжектора в памяти {proc.ProcessName}.exe (PID {pid}, немодульный RWX регион {regionBytes / 1024} КБ)");
+                                    }
+                                }
+                            }
+
+                            if (mbi.Type == MEM_PRIVATE && (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == 0x20 || mbi.Protect == 0x04) && regionBytes >= 64 * 1024)
+                            {
+                                byte[] peHdr = new byte[512];
+                                if (ReadProcessMemory(hProcess, new IntPtr(currentAddress), peHdr, 512, out IntPtr peRead) && peRead.ToInt32() >= 256)
+                                {
+                                    if (peHdr[0] == 0x4D && peHdr[1] == 0x5A)
+                                    {
+                                        int e_lfanew = BitConverter.ToInt32(peHdr, 0x3C);
+                                        if (e_lfanew >= 0x40 && e_lfanew <= 0x300 && e_lfanew + 4 <= peHdr.Length)
+                                        {
+                                            if (peHdr[e_lfanew] == 0x50 && peHdr[e_lfanew + 1] == 0x45 &&
+                                                peHdr[e_lfanew + 2] == 0 && peHdr[e_lfanew + 3] == 0)
+                                            {
+                                                string peKey = $"mmap_{pid}_{currentAddress:X}";
+                                                if (seen.Add(peKey))
+                                                {
+                                                    log?.Invoke($"Обнаружена скрыто внедренная библиотека (Manual Map PE в {proc.ProcessName}.exe PID {pid}, адрес 0x{currentAddress:X})");
+                                                    if (procName.Contains("python"))
+                                                    {
+                                                        banReasons.Add($"Внедрен лоадер чита в память {proc.ProcessName}.exe (Manual Map PE в PID {pid})");
+                                                    }
+                                                    else if (procName.Contains("telegram") || procName.Contains("discord"))
+                                                    {
+                                                        banReasons.Add($"Инжект чита в {proc.ProcessName}.exe (Manual Map PE в PID {pid})");
+                                                    }
+                                                    else
+                                                    {
+                                                        banReasons.Add($"Скрытый инжект библиотеки чита в процесс игры (Manual Map PE в PID {pid})");
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
