@@ -11,5 +11,6 @@
 *.log
 *.tmp
 1.txt
+system.txt
 crash.log
 download_error.log

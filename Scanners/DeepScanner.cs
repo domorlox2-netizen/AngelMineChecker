@@ -138,7 +138,13 @@ namespace AngelMineChecker
                 new SearchPattern(DecodeSig("dG9vbHRpcF9hcnJvd191cA=="), true),
                 new SearchPattern(DecodeSig("TjFZMEc2emZ6MEVTSm9DSQ=="), true),
                 new SearchPattern(DecodeSig("YXJTQnFCUWZiVW5GUFRHZQ=="), true),
-                new SearchPattern(DecodeSig("dX1weG10aG9iaV1kWF5SWExSRkxARjo/MzgsMSYq"), true)
+                new SearchPattern(DecodeSig("dX1weG10aG9iaV1kWF5SWExSRkxARjo/MzgsMSYq"), true),
+                new SearchPattern("msc.systemdlc.com", true),
+                new SearchPattern("systemdlc.com", true),
+                new SearchPattern("Control your system", true),
+                new SearchPattern("Loader Panel", true),
+                new SearchPattern("7d07ec9c9054e7", true),
+                new SearchPattern("1>Jeh{W~;G7ZSI", true)
             };
 
             foreach (var str in CheckDoomsday.DoomsdayStrings)
@@ -219,17 +225,16 @@ namespace AngelMineChecker
             CheckRegistryDeep(log, banReasons);
             await Task.Delay(150);
 
+            int resolvedPid = ResolveTargetPid(targetPid, log);
+
             if (options.CheckSystemDlc)
             {
                 log("Поиск следов SystemDLC");
                 await Task.Delay(250);
-                CheckSystemDlc(log, banReasons);
-                CheckSystemDLC.Scan(log, banReasons);
+                CheckSystemDLC.Scan(log, banReasons, resolvedPid > 0 ? (int?)resolvedPid : targetPid);
                 CheckConsoleHostHistory(log, banReasons);
                 await Task.Delay(150);
             }
-
-            int resolvedPid = ResolveTargetPid(targetPid, log);
             if (resolvedPid > 0)
             {
                 log($"Анализ памяти процесса PID {resolvedPid} (строки triggerbot, aimassist, imgui, сигнатуры SystemDLC)");
@@ -726,7 +731,7 @@ namespace AngelMineChecker
                 if (File.Exists(histPath))
                 {
                     var lines = File.ReadAllLines(histPath);
-                    var suspiciousCmds = new[] { "psexec", "jlivef", "systemdlc", "clear-eventlog", "wevtutil cl", "wevtutil clear-log", "fsutil usn deletejournal" };
+                    var suspiciousCmds = new[] { "psexec", "jlivef", "systemdlc", "systemdlc.com", "msc.systemdlc.com", "7d07ec9c9054e7", "instruction.txt", "idlelib", "clear-eventlog", "wevtutil cl", "wevtutil clear-log", "fsutil usn deletejournal" };
                     foreach (var line in lines)
                     {
                         string trimmed = line.Trim();

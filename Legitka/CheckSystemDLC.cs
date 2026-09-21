@@ -2,7 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
+using AngelMineChecker.Services;
 
 namespace AngelMineChecker
 {
@@ -19,10 +23,101 @@ namespace AngelMineChecker
             DecodeSig("dX1weG10aG9iaV1kWF5SWExSRkxARjo/MzgsMSYq")
         };
 
+        public static readonly string[] PythonInjectionSignatures = new[]
+        {
+            "msc.systemdlc.com",
+            "systemdlc.com",
+            "/instruction.txt",
+            "Control your system",
+            "Loader Panel",
+            "7d07ec9c9054e7",
+            "1>Jeh{W~;G7ZSI@>OXtX",
+            "vars(__import__(('builtin','s')",
+            "('d','ecompress')",
+            "('operato'+'r')",
+            "chr(101)+chr(120)+chr(101)+chr(99)",
+            "chr(97)+chr(116)+chr(116)+chr(114)+chr(103)+chr(101)+chr(116)+chr(116)+chr(101)+chr(114)",
+            "chr(122)+chr(108)+chr(105)+chr(98)",
+            "chr(98)+chr(56)+chr(53)+chr(100)+chr(101)+chr(99)+chr(111)+chr(100)+chr(101)"
+        };
+
+        public static readonly string[] KnownSystemDlcIps = new[]
+        {
+            "31.77.78.109",
+            "172.67.178.",
+            "104.21.18."
+        };
+
         private static string DecodeSig(string b64)
         {
             return Encoding.UTF8.GetString(Convert.FromBase64String(b64));
         }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MEMORY_BASIC_INFORMATION
+        {
+            public IntPtr BaseAddress;
+            public IntPtr AllocationBase;
+            public uint AllocationProtect;
+            public IntPtr RegionSize;
+            public uint State;
+            public uint Protect;
+            public uint Type;
+        }
+
+        private const uint MEM_COMMIT = 0x1000;
+        private const uint MEM_PRIVATE = 0x20000;
+        private const uint PAGE_NOACCESS = 0x01;
+        private const uint PAGE_GUARD = 0x100;
+        private const uint PAGE_EXECUTE_READWRITE = 0x40;
+        private const uint PROCESS_QUERY_INFORMATION = 0x0400;
+        private const uint PROCESS_VM_READ = 0x0010;
+        private const uint CF_UNICODETEXT = 13;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern int VirtualQueryEx(IntPtr hProcess, IntPtr lpAddress, out MEMORY_BASIC_INFORMATION lpBuffer, uint dwLength);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, [Out] byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesRead);
+
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool CloseClipboard();
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetClipboardData(uint uFormat);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GlobalLock(IntPtr hMem);
+
+        [DllImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GlobalUnlock(IntPtr hMem);
 
         public static bool CheckInFile(FileInfo file, out string foundSig)
         {
@@ -30,8 +125,8 @@ namespace AngelMineChecker
             if (file == null || !file.Exists) return false;
             if (QuickScanner.IsCheckerOrSelf(file.FullName)) return false;
 
-            string nameLower = file.Name.ToLower();
-            string ext = file.Extension.ToLower();
+            string nameLower = file.Name.ToLowerInvariant();
+            string ext = file.Extension.ToLowerInvariant();
             if (nameLower.StartsWith("+~jf") || ext == ".ttf" || ext == ".otf" || ext == ".woff" || ext == ".woff2")
                 return false;
 
@@ -66,23 +161,455 @@ namespace AngelMineChecker
                             return true;
                         }
                     }
+
+                    foreach (var sig in PythonInjectionSignatures)
+                    {
+                        if (ascii.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            utf8.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            unicode.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            foundSig = sig;
+                            return true;
+                        }
+                    }
                 }
             }
             catch { }
             return false;
         }
 
-        public static void Scan(Action<string> log, List<string> banReasons)
+        public static void Scan(Action<string> log, List<string> banReasons, int? targetMinecraftPid = null)
         {
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            CheckActiveWindows(log, banReasons, seen);
+
+            CheckClipboard(log, banReasons, seen);
+
+            ScanProcessesMemory(targetMinecraftPid, log, banReasons, seen);
+
+            CheckDnsCache(log, banReasons, seen);
+
+            CheckNetworkConnections(log, banReasons, seen);
+
+            ScanFilesAndHistory(log, banReasons, seen);
+
+            CheckPrefetch(log, banReasons, seen);
+        }
+
+        private static void CheckActiveWindows(Action<string> log, List<string> banReasons, HashSet<string> seen)
+        {
+            try
+            {
+                EnumWindows((hWnd, lParam) =>
+                {
+                    try
+                    {
+                        if (IsWindowVisible(hWnd))
+                        {
+                            var sb = new StringBuilder(512);
+                            int len = GetWindowText(hWnd, sb, sb.Capacity);
+                            if (len > 0)
+                            {
+                                string title = sb.ToString().Trim();
+                                string titleLower = title.ToLowerInvariant();
+
+                                if (titleLower == "loader panel" || titleLower.Contains("loader panel") ||
+                                    titleLower.Contains("control your system"))
+                                {
+                                    GetWindowThreadProcessId(hWnd, out uint pid);
+                                    string procName = "Неизвестно";
+                                    try { procName = Process.GetProcessById((int)pid).ProcessName; } catch { }
+
+                                    string key = $"win_{pid}_{title}";
+                                    if (seen.Add(key))
+                                    {
+                                        log?.Invoke($"Обнаружено активное окно лоадера SystemDLC: \"{title}\" (процесс {procName}.exe, PID {pid})");
+                                        banReasons.Add($"Найден активный лоадер SystemDLC (окно \"{title}\" в процессе {procName}.exe PID {pid})");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                    return true;
+                }, IntPtr.Zero);
+            }
+            catch { }
+        }
+
+        private static void CheckClipboard(Action<string> log, List<string> banReasons, HashSet<string> seen)
+        {
+            try
+            {
+                string text = GetClipboardTextSafe();
+                if (!string.IsNullOrEmpty(text))
+                {
+                    foreach (var sig in PythonInjectionSignatures)
+                    {
+                        if (text.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            if (seen.Add("clip_sysdlc"))
+                            {
+                                log?.Invoke($"Обнаружена команда инжектора SystemDLC в буфере обмена (сигнатура: {sig})");
+                                banReasons.Add($"Команда инжектора SystemDLC в буфере обмена (сигнатура: {sig})");
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static string GetClipboardTextSafe()
+        {
+            try
+            {
+                if (!OpenClipboard(IntPtr.Zero)) return null;
+                try
+                {
+                    IntPtr handle = GetClipboardData(CF_UNICODETEXT);
+                    if (handle == IntPtr.Zero) return null;
+                    IntPtr pointer = GlobalLock(handle);
+                    if (pointer == IntPtr.Zero) return null;
+                    try
+                    {
+                        return Marshal.PtrToStringUni(pointer);
+                    }
+                    finally
+                    {
+                        GlobalUnlock(handle);
+                    }
+                }
+                finally
+                {
+                    CloseClipboard();
+                }
+            }
+            catch { return null; }
+        }
+
+        private static void ScanProcessesMemory(int? targetMinecraftPid, Action<string> log, List<string> banReasons, HashSet<string> seen)
+        {
+            var targetPids = new HashSet<int>();
+
+            if (targetMinecraftPid.HasValue && targetMinecraftPid.Value > 0)
+            {
+                targetPids.Add(targetMinecraftPid.Value);
+            }
+
+            foreach (var pid in MinecraftProcessDetector.GetAllMinecraftPids(targetMinecraftPid))
+            {
+                targetPids.Add(pid);
+            }
+
+            string[] hostNames = new[] { "python", "pythonw", "telegram", "discord" };
+            foreach (var hName in hostNames)
+            {
+                try
+                {
+                    foreach (var p in Process.GetProcessesByName(hName))
+                    {
+                        try
+                        {
+                            if (!p.HasExited) targetPids.Add(p.Id);
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+
+            var allSignatures = Signatures.Concat(PythonInjectionSignatures).Distinct().ToList();
+
+            foreach (int pid in targetPids)
+            {
+                IntPtr hProcess = IntPtr.Zero;
+                try
+                {
+                    Process proc;
+                    try { proc = Process.GetProcessById(pid); } catch { continue; }
+                    if (proc.HasExited) continue;
+
+                    string procName = proc.ProcessName.ToLowerInvariant();
+
+                    hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+                    if (hProcess == IntPtr.Zero) continue;
+
+                    long maxAddress = 0x7FFFFFFF0000;
+                    long currentAddress = 0;
+                    byte[] buffer = new byte[2 * 1024 * 1024];
+
+                    bool foundInProcess = false;
+
+                    while (currentAddress < maxAddress && !foundInProcess)
+                    {
+                        MEMORY_BASIC_INFORMATION mbi;
+                        int res = VirtualQueryEx(hProcess, new IntPtr(currentAddress), out mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION)));
+                        if (res == 0) break;
+
+                        long regionBytes = mbi.RegionSize.ToInt64();
+                        if (regionBytes <= 0) break;
+
+                        if (mbi.State == MEM_COMMIT && IsReadablePage(mbi.Protect))
+                        {
+                            if ((procName.Contains("python") || procName.Contains("telegram") || procName.Contains("discord")) &&
+                                mbi.Type == MEM_PRIVATE && (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == 0x20) &&
+                                regionBytes >= 500 * 1024)
+                            {
+                                string unbackedKey = $"unbacked_rwx_{pid}_{currentAddress:X}";
+                                if (seen.Add(unbackedKey))
+                                {
+                                    log?.Invoke($"Обнаружен подозрительный RWX регион инжекта в процессе {proc.ProcessName} (PID {pid}, адрес 0x{currentAddress:X}, размер {regionBytes / 1024} КБ)");
+                                }
+                            }
+
+                            long offset = 0;
+                            while (offset < regionBytes && !foundInProcess)
+                            {
+                                int toRead = (int)Math.Min((long)buffer.Length, regionBytes - offset);
+                                IntPtr readAddr = new IntPtr(currentAddress + offset);
+
+                                if (ReadProcessMemory(hProcess, readAddr, buffer, toRead, out IntPtr bytesRead) && bytesRead.ToInt32() > 0)
+                                {
+                                    int readCount = bytesRead.ToInt32();
+
+                                    foreach (var sig in allSignatures)
+                                    {
+                                        if (ContainsString(buffer, readCount, sig))
+                                        {
+                                            string key = $"mem_{pid}_{sig}";
+                                            if (seen.Add(key))
+                                            {
+                                                long foundAddr = currentAddress + offset;
+                                                log?.Invoke($"Обнаружена сигнатура SystemDLC в памяти процесса {proc.ProcessName} PID {pid} (адрес 0x{foundAddr:X}): {sig}");
+
+                                                if (procName.Contains("python"))
+                                                {
+                                                    banReasons.Add($"Инжект SystemDLC через Python IDLE (PID {pid}, сигнатура: {sig})");
+                                                }
+                                                else if (procName.Contains("telegram") || procName.Contains("discord"))
+                                                {
+                                                    banReasons.Add($"Инжект лоадера SystemDLC в {proc.ProcessName}.exe (PID {pid}, сигнатура: {sig})");
+                                                }
+                                                else
+                                                {
+                                                    banReasons.Add($"Найден инжект SystemDLC в памяти процесса Minecraft PID {pid} (сигнатура: {sig})");
+                                                }
+                                                foundInProcess = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                offset += toRead;
+                            }
+                        }
+
+                        currentAddress += regionBytes;
+                    }
+                }
+                catch { }
+                finally
+                {
+                    if (hProcess != IntPtr.Zero)
+                    {
+                        CloseHandle(hProcess);
+                    }
+                }
+            }
+        }
+
+        private static bool IsReadablePage(uint protect)
+        {
+            if ((protect & PAGE_NOACCESS) != 0 || (protect & PAGE_GUARD) != 0)
+                return false;
+            return (protect & 0x02) != 0 ||
+                   (protect & 0x04) != 0 ||
+                   (protect & 0x20) != 0 ||
+                   (protect & 0x40) != 0;
+        }
+
+        private static bool ContainsString(byte[] buffer, int length, string search)
+        {
+            if (buffer == null || length <= 0 || string.IsNullOrEmpty(search)) return false;
+
+            byte[] ascii = Encoding.ASCII.GetBytes(search);
+            if (IndexOf(buffer, length, ascii) >= 0) return true;
+
+            byte[] unicode = Encoding.Unicode.GetBytes(search);
+            if (IndexOf(buffer, length, unicode) >= 0) return true;
+
+            return false;
+        }
+
+        private static int IndexOf(byte[] source, int sourceLen, byte[] pattern)
+        {
+            if (pattern.Length == 0 || sourceLen < pattern.Length) return -1;
+            for (int i = 0; i <= sourceLen - pattern.Length; i++)
+            {
+                bool match = true;
+                for (int j = 0; j < pattern.Length; j++)
+                {
+                    if (source[i + j] != pattern[j])
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) return i;
+            }
+            return -1;
+        }
+
+        private static void CheckDnsCache(Action<string> log, List<string> banReasons, HashSet<string> seen)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "ipconfig",
+                    Arguments = "/displaydns",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+
+                using (var proc = Process.Start(psi))
+                {
+                    string output = proc.StandardOutput.ReadToEnd();
+                    proc.WaitForExit(3000);
+
+                    if (output.IndexOf("systemdlc.com", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        output.IndexOf("msc.systemdlc.com", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        if (seen.Add("dns_systemdlc"))
+                        {
+                            log?.Invoke("Обнаружен след обращения к серверу SystemDLC в DNS кэше (msc.systemdlc.com / systemdlc.com)");
+                            banReasons.Add("След запуска инжектора SystemDLC в DNS кэше (msc.systemdlc.com / systemdlc.com)");
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static void CheckNetworkConnections(Action<string> log, List<string> banReasons, HashSet<string> seen)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "netstat",
+                    Arguments = "-ano -p tcp",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+
+                using (var proc = Process.Start(psi))
+                {
+                    string output = proc.StandardOutput.ReadToEnd();
+                    proc.WaitForExit(3000);
+
+                    using (var reader = new StringReader(output))
+                    {
+                        string line;
+                        while ((line = reader.ReadLine()) != null)
+                        {
+                            line = line.Trim();
+                            if (!line.StartsWith("TCP", StringComparison.OrdinalIgnoreCase)) continue;
+
+                            string[] parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                            if (parts.Length < 5) continue;
+
+                            string remoteAddr = parts[2];
+                            string state = parts[3];
+                            string pidStr = parts[4];
+
+                            foreach (var ipPrefix in KnownSystemDlcIps)
+                            {
+                                if (remoteAddr.StartsWith(ipPrefix, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    string key = $"net_{remoteAddr}_{pidStr}";
+                                    if (seen.Add(key))
+                                    {
+                                        log?.Invoke($"Обнаружено сетевое подключение к серверу SystemDLC: {remoteAddr} ({state}, PID {pidStr})");
+                                        banReasons.Add($"Сетевое подключение к серверу SystemDLC ({remoteAddr} в PID {pidStr}, {state})");
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static void ScanFilesAndHistory(Action<string> log, List<string> banReasons, HashSet<string> seen)
+        {
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+            try
+            {
+                string pyHistory = Path.Combine(userProfile, ".python_history");
+                if (File.Exists(pyHistory))
+                {
+                    var fi = new FileInfo(pyHistory);
+                    if (fi.Length > 0 && fi.Length <= 10 * 1024 * 1024)
+                    {
+                        string historyContent = File.ReadAllText(pyHistory, Encoding.UTF8);
+                        foreach (var sig in PythonInjectionSignatures)
+                        {
+                            if (historyContent.IndexOf(sig, StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                if (seen.Add("py_history_sysdlc"))
+                                {
+                                    log?.Invoke($"Обнаружена команда запуска SystemDLC в истории Python (.python_history, сигнатура: {sig})");
+                                    banReasons.Add($"Команда инжектора SystemDLC в .python_history (сигнатура: {sig})");
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                string idlercRecent = Path.Combine(userProfile, ".idlerc", "recent-files.lst");
+                if (File.Exists(idlercRecent))
+                {
+                    string idlercContent = File.ReadAllText(idlercRecent, Encoding.UTF8);
+                    if (idlercContent.IndexOf("system", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        idlercContent.IndexOf("dlc", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        if (seen.Add("idlerc_recent"))
+                        {
+                            log?.Invoke($"Обнаружен запуск подозрительного файла в истории Python IDLE (.idlerc/recent-files.lst)");
+                            banReasons.Add("Подозрительный запуск скрипта в истории Python IDLE");
+                        }
+                    }
+                }
+            }
+            catch { }
+
             string[] probeDirs = new[]
             {
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
-                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                Path.Combine(userProfile, "Downloads"),
+                Path.Combine(userProfile, "Desktop"),
+                Path.Combine(userProfile, "Documents"),
                 Path.GetTempPath(),
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)
+                userProfile,
+                Path.Combine(userProfile, ".idlerc"),
+                appData,
+                localAppData
             };
 
             foreach (var dir in probeDirs)
@@ -94,13 +621,12 @@ namespace AngelMineChecker
                     foreach (var sub in Directory.GetDirectories(dir))
                     {
                         if (QuickScanner.IsCheckerOrSelf(sub)) continue;
-                        string subName = Path.GetFileName(sub).ToLower();
+                        string subName = Path.GetFileName(sub).ToLowerInvariant();
                         if (subName.Contains("jlivef") || subName.Contains("systemdlc"))
                         {
-                            if (!seen.Contains(sub))
+                            if (seen.Add(sub))
                             {
-                                seen.Add(sub);
-                                log($"Найден: Папка {Path.GetFileName(sub)} ({sub})");
+                                log?.Invoke($"Найден: Папка {Path.GetFileName(sub)} ({sub})");
                                 banReasons.Add($"Найдена папка чита - {Path.GetFileName(sub)} ({sub})");
                             }
                         }
@@ -113,14 +639,13 @@ namespace AngelMineChecker
                     foreach (var f in Directory.GetFiles(dir))
                     {
                         if (QuickScanner.IsCheckerOrSelf(f)) continue;
-                        string fName = Path.GetFileName(f).ToLower();
+                        string fName = Path.GetFileName(f).ToLowerInvariant();
 
                         if (fName.Contains("jlivef") || fName.Contains("systemdlc") || fName.Contains("psexec"))
                         {
-                            if (!seen.Contains(f))
+                            if (seen.Add(f))
                             {
-                                seen.Add(f);
-                                log($"Найден: Файл {Path.GetFileName(f)} ({f})");
+                                log?.Invoke($"Найден: Файл {Path.GetFileName(f)} ({f})");
                                 banReasons.Add($"Найден файл чита - {Path.GetFileName(f)} ({f})");
                             }
                         }
@@ -132,11 +657,10 @@ namespace AngelMineChecker
                             {
                                 if (CheckInFile(fi, out string foundSig))
                                 {
-                                    if (!seen.Contains(f))
+                                    if (seen.Add(f))
                                     {
-                                        seen.Add(f);
-                                        log($"Найден след SystemDLC в файле: {Path.GetFileName(f)} (сигнатура {foundSig})");
-                                        banReasons.Add($"Найден SystemDLC - {f} (сигнатура: {foundSig})");
+                                        log?.Invoke($"Найден след SystemDLC в файле: {Path.GetFileName(f)} (сигнатура {foundSig})");
+                                        banReasons.Add($"Найден файл/скрипт SystemDLC - {Path.GetFileName(f)} (сигнатура: {foundSig})");
                                     }
                                 }
                             }
@@ -146,7 +670,10 @@ namespace AngelMineChecker
                 }
                 catch { }
             }
+        }
 
+        private static void CheckPrefetch(Action<string> log, List<string> banReasons, HashSet<string> seen)
+        {
             try
             {
                 string prefetchDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Prefetch");
@@ -154,15 +681,25 @@ namespace AngelMineChecker
                 {
                     foreach (var pf in Directory.GetFiles(prefetchDir, "*.pf"))
                     {
-                        string pfName = Path.GetFileName(pf).ToLower();
+                        string pfName = Path.GetFileName(pf).ToLowerInvariant();
                         if (pfName.Contains("jlivef") || pfName.Contains("systemdlc") || pfName.Contains("psexec"))
                         {
                             var fi = new FileInfo(pf);
-                            if (!seen.Contains(fi.Name))
+                            if (seen.Add(fi.Name))
                             {
-                                seen.Add(fi.Name);
-                                log($"Найден запуск в Prefetch: {fi.Name} (время: {fi.LastWriteTime:dd.MM.yyyy HH:mm:ss})");
+                                log?.Invoke($"Найден запуск в Prefetch: {fi.Name} (время: {fi.LastWriteTime:dd.MM.yyyy HH:mm:ss})");
                                 banReasons.Add($"Найден запуск чита в Prefetch - {fi.Name}");
+                            }
+                        }
+                        else if (pfName.StartsWith("idle.exe") || pfName.StartsWith("python.exe") || pfName.StartsWith("pythonw.exe"))
+                        {
+                            var fi = new FileInfo(pf);
+                            if ((DateTime.Now - fi.LastWriteTime).TotalHours <= 6)
+                            {
+                                if (seen.Add(fi.Name))
+                                {
+                                    log?.Invoke($"Зафиксирован недавний запуск Python / IDLE в Prefetch: {fi.Name} (время: {fi.LastWriteTime:dd.MM.yyyy HH:mm:ss})");
+                                }
                             }
                         }
                     }
