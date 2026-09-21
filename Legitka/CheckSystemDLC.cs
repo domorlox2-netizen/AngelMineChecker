@@ -556,6 +556,12 @@ namespace AngelMineChecker
             catch { }
         }
 
+        private static readonly HashSet<string> CommonWebApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "chrome", "msedge", "firefox", "opera", "brave", "yandex", "vivaldi", "tor",
+            "spotify", "steam", "epicgameslauncher", "medal"
+        };
+
         private static void CheckNetworkConnections(Action<string> log, List<string> banReasons, HashSet<string> seen, HashSet<int> extraPids = null)
         {
             try
@@ -593,7 +599,24 @@ namespace AngelMineChecker
                             {
                                 if (remoteAddr.StartsWith(ipPrefix, StringComparison.OrdinalIgnoreCase))
                                 {
-                                    if (int.TryParse(pidStr, out int npid) && npid > 0)
+                                    string procName = "unknown";
+                                    int npid = 0;
+                                    if (int.TryParse(pidStr, out npid) && npid > 0)
+                                    {
+                                        try { procName = Process.GetProcessById(npid).ProcessName.ToLowerInvariant(); } catch { }
+                                    }
+
+                                    bool isCloudflare = remoteAddr.StartsWith("172.67.178.", StringComparison.OrdinalIgnoreCase) ||
+                                                        remoteAddr.StartsWith("104.21.18.", StringComparison.OrdinalIgnoreCase);
+
+                                    bool isDedicatedCheatHost = remoteAddr.StartsWith("31.77.78.109", StringComparison.OrdinalIgnoreCase);
+
+                                    if (isCloudflare && CommonWebApps.Contains(procName))
+                                    {
+                                        continue;
+                                    }
+
+                                    if (npid > 0)
                                     {
                                         extraPids?.Add(npid);
                                     }
@@ -601,8 +624,20 @@ namespace AngelMineChecker
                                     string key = $"net_{remoteAddr}_{pidStr}";
                                     if (seen.Add(key))
                                     {
-                                        log?.Invoke($"Обнаружено сетевое подключение к серверу SystemDLC: {remoteAddr} ({state}, PID {pidStr})");
-                                        banReasons.Add($"Сетевое подключение к серверу SystemDLC ({remoteAddr} в PID {pidStr}, {state})");
+                                        if (isDedicatedCheatHost)
+                                        {
+                                            log?.Invoke($"Обнаружено прямое подключение к серверу SystemDLC: {remoteAddr} (процесс {procName}.exe PID {pidStr}, {state})");
+                                            banReasons.Add($"Сетевое подключение к серверу SystemDLC ({remoteAddr} в {procName}.exe PID {pidStr})");
+                                        }
+                                        else if (procName.Contains("python") || procName.Contains("javaw") || procName.Contains("pulse"))
+                                        {
+                                            log?.Invoke($"Обнаружено сетевое подключение чита: {remoteAddr} (процесс {procName}.exe PID {pidStr}, {state})");
+                                            banReasons.Add($"Инжектор SystemDLC держит сетевое подключение ({remoteAddr} в {procName}.exe PID {pidStr})");
+                                        }
+                                        else
+                                        {
+                                            log?.Invoke($"Сетевая активность на адресах SystemDLC: {remoteAddr} ({procName}.exe, PID {pidStr})");
+                                        }
                                     }
                                     break;
                                 }
