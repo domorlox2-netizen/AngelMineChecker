@@ -181,23 +181,24 @@ namespace AngelMineChecker
         public static void Scan(Action<string> log, List<string> banReasons, int? targetMinecraftPid = null)
         {
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var extraPids = new HashSet<int>();
 
-            CheckActiveWindows(log, banReasons, seen);
+            CheckActiveWindows(log, banReasons, seen, extraPids);
 
             CheckClipboard(log, banReasons, seen);
 
-            ScanProcessesMemory(targetMinecraftPid, log, banReasons, seen);
+            CheckNetworkConnections(log, banReasons, seen, extraPids);
+
+            ScanProcessesMemory(targetMinecraftPid, extraPids, log, banReasons, seen);
 
             CheckDnsCache(log, banReasons, seen);
-
-            CheckNetworkConnections(log, banReasons, seen);
 
             ScanFilesAndHistory(log, banReasons, seen);
 
             CheckPrefetch(log, banReasons, seen);
         }
 
-        private static void CheckActiveWindows(Action<string> log, List<string> banReasons, HashSet<string> seen)
+        private static void CheckActiveWindows(Action<string> log, List<string> banReasons, HashSet<string> seen, HashSet<int> extraPids)
         {
             try
             {
@@ -215,9 +216,12 @@ namespace AngelMineChecker
                                 string titleLower = title.ToLowerInvariant();
 
                                 if (titleLower == "loader panel" || titleLower.Contains("loader panel") ||
-                                    titleLower.Contains("control your system"))
+                                    titleLower.Contains("control your system") ||
+                                    titleLower.Contains("system dlc") || titleLower.Contains("systemdlc"))
                                 {
                                     GetWindowThreadProcessId(hWnd, out uint pid);
+                                    if (pid > 0) extraPids?.Add((int)pid);
+
                                     string procName = "Неизвестно";
                                     try { procName = Process.GetProcessById((int)pid).ProcessName; } catch { }
 
@@ -290,7 +294,7 @@ namespace AngelMineChecker
             catch { return null; }
         }
 
-        private static void ScanProcessesMemory(int? targetMinecraftPid, Action<string> log, List<string> banReasons, HashSet<string> seen)
+        private static void ScanProcessesMemory(int? targetMinecraftPid, HashSet<int> extraPids, Action<string> log, List<string> banReasons, HashSet<string> seen)
         {
             var targetPids = new HashSet<int>();
 
@@ -304,7 +308,15 @@ namespace AngelMineChecker
                 targetPids.Add(pid);
             }
 
-            string[] hostNames = new[] { "python", "pythonw", "telegram", "discord" };
+            if (extraPids != null)
+            {
+                foreach (var ep in extraPids)
+                {
+                    if (ep > 0) targetPids.Add(ep);
+                }
+            }
+
+            string[] hostNames = new[] { "python", "pythonw", "telegram", "discord", "steam", "spotify", "epicgameslauncher", "medal", "obs64", "devenv" };
             foreach (var hName in hostNames)
             {
                 try
@@ -356,12 +368,16 @@ namespace AngelMineChecker
                         {
                             if ((procName.Contains("python") || procName.Contains("telegram") || procName.Contains("discord")) &&
                                 mbi.Type == MEM_PRIVATE && (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == 0x20) &&
-                                regionBytes >= 500 * 1024)
+                                regionBytes >= 256 * 1024)
                             {
                                 string unbackedKey = $"unbacked_rwx_{pid}_{currentAddress:X}";
                                 if (seen.Add(unbackedKey))
                                 {
                                     log?.Invoke($"Обнаружен подозрительный RWX регион инжекта в процессе {proc.ProcessName} (PID {pid}, адрес 0x{currentAddress:X}, размер {regionBytes / 1024} КБ)");
+                                    if (procName.Contains("python"))
+                                    {
+                                        banReasons.Add($"Обнаружен исполняемый шеллкод инжектора в памяти {proc.ProcessName}.exe (PID {pid}, немодульный RWX регион {regionBytes / 1024} КБ)");
+                                    }
                                 }
                             }
 
@@ -437,23 +453,65 @@ namespace AngelMineChecker
             if (buffer == null || length <= 0 || string.IsNullOrEmpty(search)) return false;
 
             byte[] ascii = Encoding.ASCII.GetBytes(search);
-            if (IndexOf(buffer, length, ascii) >= 0) return true;
+            if (IndexOfAsciiIgnoreCase(buffer, length, ascii) >= 0) return true;
 
-            byte[] unicode = Encoding.Unicode.GetBytes(search);
-            if (IndexOf(buffer, length, unicode) >= 0) return true;
+            if (IndexOfUnicodeIgnoreCase(buffer, length, search) >= 0) return true;
 
             return false;
         }
 
-        private static int IndexOf(byte[] source, int sourceLen, byte[] pattern)
+        private static int IndexOfAsciiIgnoreCase(byte[] source, int sourceLen, byte[] pattern)
         {
             if (pattern.Length == 0 || sourceLen < pattern.Length) return -1;
+            byte first = pattern[0];
+            byte firstLower = (first >= (byte)'A' && first <= (byte)'Z') ? (byte)(first + 32) : first;
+            byte firstUpper = (first >= (byte)'a' && first <= (byte)'z') ? (byte)(first - 32) : first;
+
             for (int i = 0; i <= sourceLen - pattern.Length; i++)
             {
+                byte b = source[i];
+                if (b != firstLower && b != firstUpper) continue;
+
                 bool match = true;
-                for (int j = 0; j < pattern.Length; j++)
+                for (int j = 1; j < pattern.Length; j++)
                 {
-                    if (source[i + j] != pattern[j])
+                    byte s = source[i + j];
+                    byte p = pattern[j];
+                    if (s != p)
+                    {
+                        byte sLow = (s >= (byte)'A' && s <= (byte)'Z') ? (byte)(s + 32) : s;
+                        byte pLow = (p >= (byte)'A' && p <= (byte)'Z') ? (byte)(p + 32) : p;
+                        if (sLow != pLow)
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+                }
+                if (match) return i;
+            }
+            return -1;
+        }
+
+        private static int IndexOfUnicodeIgnoreCase(byte[] source, int sourceLen, string pattern)
+        {
+            if (string.IsNullOrEmpty(pattern)) return -1;
+            int patByteLen = pattern.Length * 2;
+            if (sourceLen < patByteLen) return -1;
+
+            string patLower = pattern.ToLowerInvariant();
+            char firstChar = patLower[0];
+
+            for (int i = 0; i <= sourceLen - patByteLen; i += 2)
+            {
+                char c = (char)(source[i] | (source[i + 1] << 8));
+                if (char.ToLowerInvariant(c) != firstChar) continue;
+
+                bool match = true;
+                for (int j = 1; j < patLower.Length; j++)
+                {
+                    char sc = (char)(source[i + j * 2] | (source[i + j * 2 + 1] << 8));
+                    if (char.ToLowerInvariant(sc) != patLower[j])
                     {
                         match = false;
                         break;
@@ -496,7 +554,7 @@ namespace AngelMineChecker
             catch { }
         }
 
-        private static void CheckNetworkConnections(Action<string> log, List<string> banReasons, HashSet<string> seen)
+        private static void CheckNetworkConnections(Action<string> log, List<string> banReasons, HashSet<string> seen, HashSet<int> extraPids = null)
         {
             try
             {
@@ -533,6 +591,11 @@ namespace AngelMineChecker
                             {
                                 if (remoteAddr.StartsWith(ipPrefix, StringComparison.OrdinalIgnoreCase))
                                 {
+                                    if (int.TryParse(pidStr, out int npid) && npid > 0)
+                                    {
+                                        extraPids?.Add(npid);
+                                    }
+
                                     string key = $"net_{remoteAddr}_{pidStr}";
                                     if (seen.Add(key))
                                     {
