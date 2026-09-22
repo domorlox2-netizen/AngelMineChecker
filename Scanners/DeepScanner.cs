@@ -1141,6 +1141,7 @@ namespace AngelMineChecker
                         if (cheatNameMatch || fromSuspiciousFolder)
                         {
                             log($"Найден подозрительный инжект DLL: {modName} ({modPath})");
+                            log($"   -> [Process Hacker] Как найти: Process Hacker -> PID {pid} (javaw.exe) -> вкладка Modules -> найти \"{modName}\" (проверить цифровую подпись и путь)");
                             banReasons.Add($"Найден подозрительный инжект DLL - {modName} ({modPath})");
                         }
                     }
@@ -1182,6 +1183,8 @@ namespace AngelMineChecker
 
             if (modNameLower.Contains("watermedia") ||
                 modPath.IndexOf(@"\watermedia\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                modNameLower.Contains("mediaplayerinfo") ||
+                modPath.IndexOf(@"mediaplayerinfo", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 modNameLower.StartsWith("avutil") || modNameLower.StartsWith("avcodec") ||
                 modNameLower.StartsWith("avformat") || modNameLower.StartsWith("swresample") ||
                 modNameLower.StartsWith("swscale") || modNameLower.StartsWith("avfilter") ||
@@ -1251,6 +1254,7 @@ namespace AngelMineChecker
                         if (cheatNameMatch || fromSuspiciousFolder)
                         {
                             log($"Найден подозрительный инжект DLL: {modName} ({modPath})");
+                            log($"   -> [Process Hacker] Как найти: Process Hacker -> PID {pid} (javaw.exe) -> вкладка Modules -> найти \"{modName}\" (проверить цифровую подпись и путь)");
                             banReasons.Add($"Найден подозрительный инжект DLL - {modName} ({modPath})");
                         }
                     }

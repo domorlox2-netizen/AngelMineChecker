@@ -193,6 +193,37 @@ namespace AngelMineChecker
                 };
             }
 
+            if (sLower.Contains("подозрительный инжект dll") ||
+                sLower.Contains("след чита в памяти") ||
+                sLower.Contains("строка чита в памяти") ||
+                sLower.Contains("regedit =") ||
+                sLower.Contains("userassist") ||
+                sLower.Contains("appswitched") ||
+                sLower.Contains("bam =") ||
+                sLower.Contains("prefetch") ||
+                sLower.Contains("dns-кэш") ||
+                sLower.Contains("dns кэш") ||
+                sLower.Contains("буфер консоли") ||
+                sLower.Contains("powershell") ||
+                sLower.Contains(".python_history") ||
+                sLower.Contains("attach api") ||
+                sLower.Contains("attach.dll"))
+            {
+                string badge = "TRACE";
+                if (sLower.Contains("dll")) badge = "SUSPICIOUS DLL";
+                else if (sLower.Contains("памяти")) badge = "MEMORY TRACE";
+                else if (sLower.Contains("regedit") || sLower.Contains("userassist") || sLower.Contains("bam")) badge = "REGISTRY TRACE";
+                else if (sLower.Contains("dns")) badge = "DNS TRACE";
+
+                return new ParsedDetection
+                {
+                    Title = s,
+                    Subtitle = "Подозрительный след (проверь руками в Process Hacker)",
+                    Badge = badge,
+                    Category = "suspicious"
+                };
+            }
+
             string cheatTitle = "Illicit Software Trace";
             string cheatBadge = "DETECTED";
 

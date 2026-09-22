@@ -1202,6 +1202,11 @@ namespace AngelMineChecker
                                     desc = $"Инжект Doomsday: след чита в памяти Java ({sig.Pattern} в PID {pid}, адрес 0x{matchAddr:X})";
 
                                 log?.Invoke(desc);
+                                string phGuide = ScanSummaryFormatter.GetProcessHackerGuide(desc);
+                                if (!string.IsNullOrEmpty(phGuide))
+                                {
+                                    log?.Invoke($"   -> [Process Hacker] {phGuide}");
+                                }
                                 banReasons.Add(desc);
                                 found++;
                                 if (detectedInPid.Count >= 10) break;
@@ -1488,6 +1493,11 @@ namespace AngelMineChecker
                         foreach (var det in details)
                         {
                             sb.AppendLine($"           -> Найден след: {det}");
+                            string phGuide = ScanSummaryFormatter.GetProcessHackerGuide(det);
+                            if (!string.IsNullOrEmpty(phGuide))
+                            {
+                                sb.AppendLine($"              [Process Hacker]: {phGuide}");
+                            }
                         }
                         continue;
                     }
@@ -1553,6 +1563,11 @@ namespace AngelMineChecker
                 foreach (var reason in distinctReasons)
                 {
                     log?.Invoke($"           -> Найден след: {reason}");
+                    string phGuide = ScanSummaryFormatter.GetProcessHackerGuide(reason);
+                    if (!string.IsNullOrEmpty(phGuide))
+                    {
+                        log?.Invoke($"              [Process Hacker]: {phGuide}");
+                    }
                 }
                 foreach (var reason in distinctReasons)
                 {
