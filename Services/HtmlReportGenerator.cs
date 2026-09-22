@@ -200,14 +200,20 @@ namespace AngelMineChecker
                 sLower.Contains("userassist") ||
                 sLower.Contains("appswitched") ||
                 sLower.Contains("bam =") ||
-                sLower.Contains("prefetch") ||
+                sLower.Contains("opensavepidlmru") ||
+                sLower.Contains("muicache") ||
+                (sLower.Contains("prefetch") && !sLower.Contains("запуск чита") && !sLower.Contains("найден запуск")) ||
                 sLower.Contains("dns-кэш") ||
                 sLower.Contains("dns кэш") ||
+                sLower.Contains("в dns кэше") ||
                 sLower.Contains("буфер консоли") ||
-                sLower.Contains("powershell") ||
+                sLower.Contains("буфере консоли") ||
+                ((sLower.Contains("буфер обмена") || sLower.Contains("буфере обмена")) && !sLower.Contains("инжект") && !sLower.Contains("systemdlc")) ||
+                (sLower.Contains("powershell") && !sLower.Contains("след запуска")) ||
                 sLower.Contains(".python_history") ||
-                sLower.Contains("attach api") ||
-                sLower.Contains("attach.dll"))
+                sLower.Contains("истории python") ||
+                sLower.Contains("python idle") ||
+                (sLower.Contains("attach api") && sLower.Contains(".attach_pid")))
             {
                 string badge = "TRACE";
                 if (sLower.Contains("dll")) badge = "SUSPICIOUS DLL";

@@ -90,6 +90,11 @@ namespace AngelMineChecker
                 foreach (var c in cheats)
                 {
                     log($"   • {c}");
+                    string guide = GetProcessHackerGuide(c);
+                    if (!string.IsNullOrEmpty(guide))
+                    {
+                        log($"     -> [Process Hacker] {guide}");
+                    }
                 }
             }
 
@@ -196,7 +201,7 @@ namespace AngelMineChecker
             if (lower.Contains("regedit =") || lower.Contains("userassist") || lower.Contains("appswitched") || lower.Contains("bam ="))
             {
                 string exeName = "";
-                var m = Regex.Match(item, @"([a-zA-Z0-9_\-\.]+\.exe)", RegexOptions.IgnoreCase);
+                var m = Regex.Match(item, @"([a-zA-Z0-9_\-\.]+\.(?:exe|jar|dll|bat|cmd))", RegexOptions.IgnoreCase);
                 if (m.Success) exeName = m.Groups[1].Value;
 
                 if (!string.IsNullOrEmpty(exeName))
@@ -266,17 +271,15 @@ namespace AngelMineChecker
 
             if (lower.Contains("буфер консоли") ||
                 lower.Contains("буфере консоли") ||
-                lower.Contains("буфер обмена") ||
-                lower.Contains("буфере обмена") ||
-                lower.Contains("powershell") ||
+                ((lower.Contains("буфер обмена") || lower.Contains("буфере обмена")) && !lower.Contains("инжект") && !lower.Contains("systemdlc")) ||
+                (lower.Contains("powershell") && !lower.Contains("след запуска")) ||
                 lower.Contains(".python_history") ||
                 lower.Contains("истории python") ||
                 lower.Contains("python idle") ||
-                lower.Contains("prefetch"))
+                (lower.Contains("prefetch") && !lower.Contains("запуск чита") && !lower.Contains("найден запуск")))
                 return true;
 
-            if (lower.Contains("attach api") ||
-                lower.Contains("attach.dll"))
+            if (lower.Contains("attach api") && lower.Contains(".attach_pid"))
                 return true;
 
             return false;
@@ -285,27 +288,32 @@ namespace AngelMineChecker
         private static bool IsWarning(string lower)
         {
             return lower.Contains("остановлен сервис") ||
-                   lower.Contains("служба") ||
+                   (lower.Contains("служба") && (lower.Contains("остановлен") || lower.Contains("отключен") || lower.Contains("кэширования") || lower.Contains("диагностики") || lower.Contains("sysmain") || lower.Contains("dps") || lower.Contains("pcasvc"))) ||
                    lower.Contains("pcasvc") ||
                    lower.Contains("dps") ||
                    lower.Contains("sysmain") ||
                    lower.Contains("отключен драйвер bam") ||
                    lower.Contains("драйвер bam") ||
                    lower.Contains("usn journal отключен") ||
-                   lower.Contains("отключен") ||
-                   lower.Contains("очищен") ||
-                   lower.Contains("отчищен") ||
-                   lower.Contains("обфускация") ||
+                   lower.Contains("usn journal") ||
+                   lower.Contains("папка prefetch очищена") ||
+                   lower.Contains("prefetch пустая") ||
                    lower.Contains("корзина была очищена") ||
-                   lower.Contains("prefetch пустая");
+                   lower.Contains("подозрительная обфускация") ||
+                   lower.Contains("обфускация в моде");
         }
 
         private static string FormatFolder(string s)
         {
-            int dashIdx = s.IndexOf('-');
+            int dashIdx = s.IndexOf(" - ", StringComparison.Ordinal);
             if (dashIdx >= 0)
             {
-                string info = s.Substring(dashIdx + 1).Trim();
+                string prefix = s.Substring(0, dashIdx).Trim();
+                string info = s.Substring(dashIdx + 3).Trim();
+                if (prefix.StartsWith("Найдена папка чита", StringComparison.OrdinalIgnoreCase))
+                {
+                    return $"{prefix}: {info}";
+                }
                 return $"Найдена папка чита: {info}";
             }
             if (s.StartsWith("Найдена папка чита", StringComparison.OrdinalIgnoreCase))

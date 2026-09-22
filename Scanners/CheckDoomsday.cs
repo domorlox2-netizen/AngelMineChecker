@@ -180,22 +180,6 @@ namespace AngelMineChecker
 
                 string ext = file.Extension.ToLower();
 
-                if (len >= 28000 && len <= 35000)
-                {
-                    byte[] raw = new byte[Math.Min((int)len, 65536)];
-                    using (var fs = file.OpenRead())
-                    {
-                        fs.Read(raw, 0, raw.Length);
-                    }
-                    string rawUtf8 = Encoding.UTF8.GetString(raw);
-                    if (rawUtf8.Contains("net/minecraft/client/entity/player/ClientPlayerEntity") ||
-                        rawUtf8.Contains("net/minecraft/util/math/AxisAlignedBB"))
-                    {
-                        reason = "размер ~30KB и сигнатура Entity/AxisAlignedBB";
-                        return true;
-                    }
-                }
-
                 bool isZipFormat = ext == ".jar" || ext == ".zip" || ext == ".disabled" || ext == ".bak";
                 if (!isZipFormat)
                 {
@@ -212,7 +196,25 @@ namespace AngelMineChecker
                     }
                 }
 
-                if (isZipFormat && len >= 20000)
+                if (!isZipFormat) return false;
+
+                if (len >= 28000 && len <= 35000)
+                {
+                    byte[] raw = new byte[Math.Min((int)len, 65536)];
+                    using (var fs = file.OpenRead())
+                    {
+                        fs.Read(raw, 0, raw.Length);
+                    }
+                    string rawUtf8 = Encoding.UTF8.GetString(raw);
+                    if (rawUtf8.Contains("net/minecraft/client/entity/player/ClientPlayerEntity") ||
+                        rawUtf8.Contains("net/minecraft/util/math/AxisAlignedBB"))
+                    {
+                        reason = "размер ~30KB и сигнатура Entity/AxisAlignedBB";
+                        return true;
+                    }
+                }
+
+                if (len >= 20000)
                 {
                     bool hasRootLPng = false;
                     bool hasMcmodInfoDd = false;
@@ -914,88 +916,8 @@ namespace AngelMineChecker
 
         public static int CheckJnaModules(int? preferredPid, Action<string> log, List<string> banReasons)
         {
-            int found = 0;
-            try
-            {
-                var targetPids = MinecraftProcessDetector.GetAllMinecraftPids(preferredPid);
-                if (targetPids.Count == 0) return 0;
-
-                foreach (int pid in targetPids)
-                {
-                    try
-                    {
-                        var proc = Process.GetProcessById(pid);
-                        var jnaModules = new List<ProcessModule>();
-
-                        foreach (ProcessModule mod in proc.Modules)
-                        {
-                            string mName = (mod.ModuleName ?? "").ToLower();
-                            if (mName.Contains("jna") || mName.Contains("jnidispatch"))
-                            {
-                                jnaModules.Add(mod);
-                            }
-                        }
-
-                        if (jnaModules.Count == 0) continue;
-
-                        var suspiciousModules = new List<string>();
-
-                        for (int i = 0; i < jnaModules.Count; i++)
-                        {
-                            var mod = jnaModules[i];
-                            string modName = "unknown";
-                            string filePath = "";
-
-                            try { modName = mod.ModuleName ?? "jna_module"; } catch { }
-                            try { filePath = mod.FileName ?? ""; } catch { }
-
-                            if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
-                            {
-                                try
-                                {
-                                    var fi = new FileInfo(filePath);
-                                    if (fi.Length > 0 && fi.Length < 25 * 1024 * 1024)
-                                    {
-                                        byte[] fileBytes = File.ReadAllBytes(filePath);
-                                        string content = Encoding.ASCII.GetString(fileBytes).ToLowerInvariant();
-
-                                        bool hasDoomsdaySig = content.Contains("doomsdayclient") ||
-                                                              content.Contains("doomsday") ||
-                                                              content.Contains("doomday") ||
-                                                              content.Contains("z4mfltptb") ||
-                                                              content.Contains("inject shellcode") ||
-                                                              content.Contains("com/doomsday") ||
-                                                              content.Contains("--doomsday");
-
-                                        if (hasDoomsdaySig)
-                                        {
-                                            string sizeStr = $"{fi.Length / 1024} КБ";
-                                            string timeStr = fi.CreationTime.ToString("dd.MM.yyyy HH:mm:ss");
-                                            suspiciousModules.Add($"{modName} [{filePath}] ({sizeStr}, {timeStr}, сигнатура Doomsday в коде)");
-                                        }
-                                    }
-                                }
-                                catch { }
-                            }
-                        }
-
-                        if (suspiciousModules.Count > 0)
-                        {
-                            log?.Invoke($"Обнаружен инжект Doomsday через нативный модуль в процессе PID {pid}:");
-                            foreach (var md in suspiciousModules)
-                            {
-                                log?.Invoke($"  -> {md}");
-                                banReasons.Add($"Инжект Doomsday в процесс PID {pid} ({md})");
-                            }
-                            found += suspiciousModules.Count;
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-
-            return found;
+            // Doomsday is purely a Java JAR mod/client; native modules in javaw.exe are not Doomsday injects.
+            return 0;
         }
 
         public static int CheckLoopbackPorts(int? preferredPid, Action<string> log, List<string> banReasons)
@@ -1324,7 +1246,7 @@ namespace AngelMineChecker
                     }
                 }
 
-                var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jar", ".zip", ".dll", ".disabled", ".bak", ".dat", ".bin" };
+                var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jar", ".zip", ".disabled", ".bak", ".dat", ".bin" };
 
                 void ScanDirectoryRecursive(string dirPath, int maxDepth, int currentDepth = 0)
                 {
@@ -1357,7 +1279,7 @@ namespace AngelMineChecker
                                 {
                                     ScanCandidateFile(f);
                                 }
-                                else
+                                else if (!ext.Equals(".dll", StringComparison.OrdinalIgnoreCase) && !ext.Equals(".exe", StringComparison.OrdinalIgnoreCase) && !ext.Equals(".tmp", StringComparison.OrdinalIgnoreCase))
                                 {
                                     var fi = new FileInfo(f);
                                     if (fi.Length >= 1024 * 1024 && fi.Length <= 10 * 1024 * 1024)
@@ -1535,7 +1457,6 @@ namespace AngelMineChecker
             {
                 totalFound += CheckActiveProcesses(null, internalReasons);
                 totalFound += CheckInjectedClassLoaders(targetPid, null, internalReasons);
-                totalFound += CheckJnaModules(targetPid, null, internalReasons);
                 totalFound += CheckLoopbackPorts(targetPid, null, internalReasons);
                 totalFound += CheckJvmAttach(null, internalReasons);
                 totalFound += CheckJvmMemory(targetPid, null, internalReasons);
